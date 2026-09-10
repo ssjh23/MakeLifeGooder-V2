@@ -1,0 +1,55 @@
+# Real bank statements. The one input the scaffold cannot generate.
+#
+# Drop redacted PDFs into this directory and describe each one here. The files
+# are gitignored; this manifest is committed, so the expectations are reviewable
+# even though the documents are not.
+#
+# Until a file is present, the parser tests that need it SKIP with a message
+# naming what is missing. They do not pass. A green suite that skipped the only
+# tests exercising real bank layouts would be worse than a red one.
+#
+# Redacting: the account holder's name, address and account number can all go.
+# What must survive is the transaction table, the printed total, the statement
+# period and the card's last four digits, because those are what is being
+# tested. Replacing amounts is fine as long as they still sum to the printed
+# total; changing one without the other turns every test into a reconciliation
+# failure.
+#
+# Example, for a file you have added:
+#
+#   [[statement]]
+#   file = "dbs-credit-2026-07.pdf"
+#   institution = "DBS"
+#   account_kind = "credit"
+#   last4 = "4429"
+#   period_start = 2026-07-15
+#   period_end = 2026-08-14
+#   printed_total = "2841.30"
+#   currency = "SGD"
+#   expected_rows = 47
+#   password = ""              # only if the file is encrypted
+#   notes = "Includes one refund and a foreign-currency charge."
+
+# ADR-001 adopted monopoly-core because it already covers these institutions.
+# One statement each is what proves that claim in this repository rather than in
+# a dependency's README. TC-IMP-009 asserts the right parser is chosen per bank.
+[coverage]
+target_institutions = [
+    "DBS",
+    "POSB",
+    "OCBC",
+    "UOB",
+    "Standard Chartered",
+    "HSBC",
+    "Citibank",
+    "Maybank",
+    "Trust",
+]
+
+# Worth having beyond one-per-bank, because each breaks a different assumption:
+#
+#   a statement containing a refund          negative rows must still tie
+#   two consecutive periods for one card     overlapping-row dedupe
+#   a foreign-currency charge                multi-currency, an open question
+#   a supplementary card on one statement    row-level last4 beating the tag
+#   an encrypted statement                   the unlock path end to end

@@ -1,0 +1,70 @@
+# The normaliser's fixture corpus.
+#
+# A pure function with a table of cases is the cheapest test in the codebase:
+# no database, no PDF, no fixtures directory, milliseconds to run. It is also
+# the one place that records what "the same merchant" actually means, which is
+# a judgment call rather than a fact.
+#
+# Add a row every time a real statement produces something these rules get
+# wrong. That is the intended way for this file to grow: from data, not from
+# imagination.
+
+[[case]]
+raw = "MCDONALDS-JUNCTION8"
+key = "mcdonalds"
+why = "The stated pain point. Outlet suffix after a hyphen."
+
+[[case]]
+raw = "MCDONALDS (CCP)"
+key = "mcdonalds"
+why = "Same merchant, outlet code in brackets."
+
+[[case]]
+raw = "McDonald's"
+key = "mcdonalds"
+why = "Casing and an apostrophe must not create a second merchant."
+
+[[case]]
+raw = "NTUC FAIRPRICE FINEST NEX"
+key = "fairprice"
+why = "Chain name plus format plus mall. Only the chain survives."
+
+[[case]]
+raw = "FAIRPRICE XPRESS TAMPINES"
+key = "fairprice"
+why = "Different format of the same chain."
+
+[[case]]
+raw = "GRAB *TRANSPORT SG"
+key = "grab"
+why = "Processor asterisk and a country suffix."
+
+[[case]]
+raw = "GRABFOOD"
+key = "grabfood"
+why = "Deliberately NOT grab. Different spending category, so keeping them apart matters more than tidiness."
+
+[[case]]
+raw = "SHELL SERVICE STATION 12"
+key = "shell"
+why = "Trailing station number is an outlet, not a merchant."
+
+[[case]]
+raw = "AMAZON.SG"
+key = "amazon"
+why = "Country domain suffix."
+
+[[case]]
+raw = "PAYNOW TRANSFER TO TAN AH KOW"
+key = ""
+why = "Excluded by the transfer filter before it reaches the normaliser. An empty key here means it must never become a merchant."
+
+[[case]]
+raw = "SINGTEL BILL PAYMENT 8842"
+key = "singtel"
+why = "Trailing reference number."
+
+[[case]]
+raw = "7-ELEVEN 2245"
+key = "7-eleven"
+why = "A digit and hyphen are part of the name here, not noise. The hard case for an aggressive rule."

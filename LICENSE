@@ -1,0 +1,21 @@
+Ledger is licensed under the GNU Affero General Public License, version 3.
+
+ACTION REQUIRED: this file must contain the full, verbatim licence text before
+the project is published or deployed. Download it and replace this file:
+
+    https://www.gnu.org/licenses/agpl-3.0.txt
+
+Why AGPL, recorded so it stays a choice rather than a discovery (ADR-013):
+
+  monopoly-core is AGPL-3.0 and is imported as a library, which forms a
+  combined work. Section 13 extends the source disclosure obligation to users
+  who interact with the software over a network, which is exactly how Ledger
+  is delivered. The obligation is therefore to offer source to anyone using
+  the hosted instance. For a project built to demonstrate capability that is
+  close to zero cost and arguably a benefit.
+
+  The documented exit, if commercialisation ever becomes real, is to drop
+  Monopoly and use the pdfplumber parsers instead. ADR-002 keeps that path
+  alive deliberately.
+
+Copyright (C) 2026 Sean Soo

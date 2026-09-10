@@ -1,0 +1,2 @@
+"ledger_app" "ledger_app_pw"
+"ledger_migrator" "ledger_migrator_pw"

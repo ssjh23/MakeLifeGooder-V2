@@ -1,0 +1,102 @@
+[project]
+name = "ledger"
+version = "0.1.0"
+description = "Bank statement classifier for Singapore"
+requires-python = ">=3.12"
+license = { text = "AGPL-3.0-or-later" }
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    # Alembic runs synchronously as the migration role.
+    "psycopg[binary]>=3.2",
+    "alembic>=1.14",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "procrastinate>=3.0",
+    "boto3>=1.35",
+    "structlog>=24.4",
+    "opentelemetry-api>=1.28",
+    "opentelemetry-sdk>=1.28",
+    "itsdangerous>=2.2",
+    "argon2-cffi>=23.1",
+    "anthropic>=0.39",
+    # Fallback parser. Pure Python, installs anywhere.
+    "pdfplumber>=0.11",
+]
+
+[project.optional-dependencies]
+# monopoly-core is the primary parser (ADR-001) but pulls system packages and
+# does not install cleanly on every platform. Kept optional so `uv sync` always
+# succeeds and the scaffold always runs; ParserRegistry falls back to pdfplumber
+# and says so. Install with: uv sync --extra parsers
+parsers = ["monopoly-core>=0.21"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "httpx>=0.27",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    # Used only to generate the four failure-shape fixture PDFs.
+    "reportlab>=4.2",
+    "pypdf>=5.1",
+    "pillow>=11.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RUF"]
+ignore = [
+    # Signatures that intentionally raise NotImplementedError have unused args.
+    "ARG001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+"alembic/versions/*" = ["E501"]
+
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["procrastinate.*", "pdfplumber.*", "monopoly.*", "boto3.*", "botocore.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
+markers = [
+    "p0: blocks release. Data integrity, money correctness, tenant isolation or privacy",
+    "p1: core function. The feature is unusable or visibly wrong without it",
+    "p2: edge case, polish, or recoverable inconvenience",
+    "security: isolation, redaction and credential handling",
+    "integration: needs docker compose running",
+    "slow: excluded from the default loop",
+    "unwritten: logic Sean has not written yet. Expected to fail until he does",
+]
+filterwarnings = ["error::DeprecationWarning:app.*"]

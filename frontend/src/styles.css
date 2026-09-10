@@ -1,0 +1,130 @@
+/* Deliberately plain. Visual design is not what this scaffold is for, and a
+   half-finished design system would be harder to replace than none. */
+
+:root {
+  --ink: #1a1a1a;
+  --muted: #6b6b6b;
+  --line: #e2e2e2;
+  --accent: #3c7fc0;
+  --error: #b3261e;
+  --bg: #fbfbfb;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.9em;
+  background: #f0f0f0;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 24px 64px;
+}
+
+.nav {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 32px;
+  padding: 16px 0;
+}
+
+.nav-item {
+  padding: 6px 12px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.nav-item--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Inert, not hidden. Screen 02's copy promises these unlock later, and copy
+   that refers to something invisible reads as a bug. */
+.nav-item--locked {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.nav-item--right {
+  margin-left: auto;
+}
+
+h1 {
+  font-size: 24px;
+  margin: 0 0 8px;
+}
+
+h2 {
+  font-size: 17px;
+  margin: 24px 0 8px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--error);
+}
+
+.dropzone {
+  display: block;
+  border: 2px dashed var(--line);
+  border-radius: 10px;
+  padding: 32px;
+  text-align: center;
+  cursor: pointer;
+  margin: 24px 0;
+}
+
+.panel,
+.error-panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px;
+  background: #fff;
+}
+
+.error-panel {
+  border-color: var(--error);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 20px;
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.endpoints {
+  padding-left: 18px;
+  line-height: 2;
+}

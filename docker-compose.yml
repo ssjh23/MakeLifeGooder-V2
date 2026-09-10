@@ -1,0 +1,102 @@
+name: ledger
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Transaction mode. This is the pooler the API uses, and the mode that makes
+  # SET LOCAL app.user_id safe: the setting cannot outlive its transaction, so
+  # it cannot leak into another user's request.
+  pgbouncer:
+    build: ./infra/pgbouncer
+    command: ["/etc/pgbouncer/pgbouncer.transaction.ini"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "6432:6432"
+    volumes:
+      - ./infra/pgbouncer:/etc/pgbouncer:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U ledger_app -d ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Session mode. Deliberately misconfigured, and used by exactly one test.
+  # TC-SEC-005 exists to prove the misconfiguration is DETECTED, and that test
+  # cannot be written unless a session-mode endpoint is reachable. This service
+  # is a test fixture, not a second pooler for redundancy. Nothing else in the
+  # system may point at port 6433.
+  pgbouncer-session:
+    build: ./infra/pgbouncer
+    command: ["/etc/pgbouncer/pgbouncer.session.ini"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "6433:6433"
+    volumes:
+      - ./infra/pgbouncer:/etc/pgbouncer:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6433 -U ledger_app -d ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      # Presigned PUT is a cross-origin request from the SPA. The AWS
+      # equivalent is a bucket CORS rule, and omitting it there produces an
+      # opaque browser failure, so it is configured here too.
+      MINIO_API_CORS_ALLOW_ORIGIN: "http://localhost:5173"
+      # Enables SSE-S3 so the application can send the same encryption header
+      # locally that it must send in production. Without a KMS key MinIO
+      # rejects the header and the production path would go untested.
+      # Local development key only.
+      MINIO_KMS_SECRET_KEY: "ledger-local:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Creates the bucket and installs a CORS policy allowing presigned PUT from
+  # the SPA origin. The equivalent step in AWS is a bucket CORS rule, and
+  # forgetting it produces an opaque browser error rather than a useful one.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./infra/minio:/scripts:ro
+    entrypoint: ["/bin/sh", "/scripts/init.sh"]
+    restart: "no"
+
+volumes:
+  postgres_data:
+  minio_data:

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Environment
+.env
+.env.local
+
+# Fixture statements are real bank documents. Never commit them.
+# The manifest and generated failure shapes are committed; the PDFs are not.
+backend/tests/fixtures/pdfs/banks/*.pdf
+backend/tests/fixtures/pdfs/generated/
+
+# OS
+.DS_Store
+Thumbs.db
