@@ -68,6 +68,43 @@ class AuthService:
         logger.info(events.AUTH_LOGIN_SUCCEEDED, user_id=str(user.id))
         return user.id
 
+    async def login_with_oidc(
+        self, *, subject: str, email: str | None, email_verified: bool, name: str | None
+    ) -> uuid.UUID:
+        """Resolve an Auth0 identity to a local account, creating one if needed.
+
+        Email is the trust anchor, not the provider subject: a person who
+        registered with a password and later signs in through Auth0 with the
+        same address must land on the same account, not a second one. That
+        only holds if the address is actually verified -- an unverified email
+        is a claim, not a fact, and trusting it would let anyone sign in as an
+        address they merely typed. Once linked, ``auth_provider_id`` is what
+        lets a later sign-in skip this lookup and go straight to the account.
+
+        No password is set on a new account created this way (``password_hash``
+        stays null): screen 00's docstring already treats that as an OIDC-only
+        account, and `app/api/security.py`'s ``verify_password`` already
+        handles a null hash as "no password path", not "unset, therefore
+        broken".
+        """
+        if not email:
+            raise Unauthenticated("Auth0 did not return an email address.")
+        if not email_verified:
+            raise Unauthenticated("Verify your email address with Auth0 before signing in.")
+
+        user = await self._users.get_by_email(email)
+        if user is not None:
+            if user.auth_provider_id != subject:
+                await self._users.set_auth_provider_id(user.id, subject)
+            logger.info(events.AUTH_LOGIN_SUCCEEDED, user_id=str(user.id))
+            return user.id
+
+        user = await self._users.create(
+            email=email, password_hash=None, display_name=name, auth_provider_id=subject
+        )
+        logger.info(events.AUTH_REGISTER_SUCCEEDED, user_id=str(user.id))
+        return user.id
+
     async def me(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str, str | None, bool]:
         user = await self._users.get(user_id)
         if user is None:

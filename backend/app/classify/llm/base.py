@@ -16,7 +16,22 @@ prompt lets you reprocess exactly those rows and nothing else.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Final, Protocol
+
+#: The fixed taxonomy every adapter must answer from. Mirrors
+#: ``alembic/versions/0004_seed_categories.py``, so a ``category_slug`` this
+#: list permits is guaranteed to resolve to a real system category rather
+#: than a name the model invented (ADR-006's "known taxonomy" requirement).
+KNOWN_CATEGORY_SLUGS: Final[tuple[str, ...]] = (
+    "food-drink",
+    "transport",
+    "groceries",
+    "shopping",
+    "utilities",
+    "entertainment",
+    "health",
+    "other",
+)
 
 
 @dataclass(frozen=True, slots=True)

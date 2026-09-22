@@ -73,16 +73,26 @@ class TestErrorEnvelope:
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "malformed_request"
 
-    async def test_unwritten_logic_is_501_not_500(
-        self, client: AsyncClient, auth: dict[str, str]
-    ) -> None:
+    async def test_unwritten_logic_is_501_not_500(self, client: AsyncClient) -> None:
         """The scaffold's honest answer.
 
         An endpoint whose service method is not written yet returns 501, so it
-        is distinguishable from one that is broken. This test will start
-        failing as the logic lands, and that is the intended signal.
+        is distinguishable from one that is broken. Password reset delivery is
+        deliberately deferred rather than stubbed with fake business logic
+        (see `AuthService.request_password_reset`'s docstring: no mail
+        transport is chosen and no screen is drawn), which is what keeps this
+        example evergreen -- it is not part of the numbered build order, so
+        unlike the product endpoints it is never expected to "land" and this
+        test does not need to move to a new endpoint as each step is finished.
+
+        OIDC (also ADR-008) used to be this test's example instead: it is
+        implemented now (`app/api/routers/auth.py`), which is exactly the
+        situation this docstring describes -- a deferred seam moving to a new
+        endpoint once one implementation lands.
         """
-        response = await client.get("/api/v1/dashboard", headers=auth)
+        response = await client.post(
+            "/api/v1/auth/password-reset/request", json={"email": "nobody@example.com"}
+        )
         assert response.status_code == 501
 
 

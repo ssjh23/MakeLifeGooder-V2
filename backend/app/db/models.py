@@ -330,7 +330,15 @@ class Statement(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "file_sha256", name="uq_statements_user_id_file_sha256"),
-        # One statement per card per period. Enforced by the database, because
+        # One statement per card per period -- among *committed* (``ready``)
+        # statements. Scoped to status rather than firing the moment
+        # extraction detects a period: screen 03d exists precisely because a
+        # second, still-uncommitted draft for the same card and period has to
+        # be able to coexist long enough for a person to choose replace,
+        # keep_both or cancel. Without the status clause, extraction's own
+        # write of period_start/period_end on that second draft would hit
+        # this constraint directly and the 409 commit() is supposed to raise
+        # would never be reached. Enforced by the database, because
         # TC-DUP-007 bypasses the service layer and inserts directly.
         Index(
             "uq_statements_card_id_period",
@@ -338,7 +346,9 @@ class Statement(Base):
             "period_start",
             "period_end",
             unique=True,
-            postgresql_where=text("card_id IS NOT NULL AND period_start IS NOT NULL"),
+            postgresql_where=text(
+                "card_id IS NOT NULL AND period_start IS NOT NULL AND status = 'ready'"
+            ),
         ),
     )
 
@@ -422,6 +432,11 @@ class Transaction(Base):
     #: A removed duplicate leaves the counted total but stays on the statement
     #: record, and the removal is undoable.
     excluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Why excluded_at was set: "skip" or "delete". Never read by anything
+    #: that decides what counts toward a total -- excluded_at alone is that
+    #: single source of truth -- only by which undo label screen 03b shows.
+    #: Null for a duplicate-removed row (screen 05, a separate flow).
+    excluded_reason: Mapped[str | None] = mapped_column(Text)
     page: Mapped[int | None] = mapped_column(Integer)
     line: Mapped[int | None] = mapped_column(Integer)
 
@@ -449,6 +464,14 @@ class Merchant(Base):
         PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
+    #: slugify(canonical_name, fallback="merchant"). The actual identity key:
+    #: two suggestions differing only in casing or hyphenation ("Old Tea Hut"
+    #: vs "OLD-TEA-HUT") must resolve to one merchant, and canonical_name
+    #: itself is the display string, not the join key -- the same
+    #: distinction descriptor_key already draws for normalise()'s output.
+    #: Globally unique: merchants are cross-tenant, same as
+    #: merchant_aliases.descriptor_key's own global uniqueness.
+    name_key: Mapped[str] = mapped_column(Text, nullable=False)
     default_category_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("categories.id", ondelete="SET NULL")
     )
@@ -456,6 +479,8 @@ class Merchant(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
+
+    __table_args__ = (UniqueConstraint("name_key", name="uq_merchants_name_key"),)
 
 
 class MerchantAlias(Base):
@@ -507,6 +532,49 @@ class MerchantOverride(Base):
     __table_args__ = (
         UniqueConstraint(
             "user_id", "descriptor_key", name="uq_merchant_overrides_user_id_descriptor_key"
+        ),
+    )
+
+
+class DescriptorKeyOverride(Base):
+    """A person's own ruling that this exact raw statement line is its own
+    merchant, not whatever normalise() would fold it into.
+
+    The one raw-descriptor-keyed table in the schema. Every other join
+    (merchant_aliases, merchant_overrides, rules) keys on descriptor_key, the
+    *output* of normalise(); this keys on description_raw, the *input* to it,
+    because the whole point is to say "don't trust normalise() for this one
+    string" -- keying on its own output would be circular.
+
+    Consulted exactly where descriptor_key is computed
+    (app/classify/pipeline.py), before falling back to normalise(). Nothing
+    else needs to know this table exists.
+    """
+
+    __tablename__ = "descriptor_key_overrides"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    description_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    descriptor_key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "description_raw",
+            name="uq_descriptor_key_overrides_user_id_description_raw",
+        ),
+        Index(
+            "ix_descriptor_key_overrides_user_id_descriptor_key",
+            "user_id",
+            "descriptor_key",
         ),
     )
 
@@ -682,6 +750,7 @@ TENANT_TABLES: tuple[str, ...] = (
     "processing_jobs",
     "transactions",
     "merchant_overrides",
+    "descriptor_key_overrides",
     "rules",
     "category_monthly_totals",
     "exports",

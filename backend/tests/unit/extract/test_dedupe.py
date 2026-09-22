@@ -130,12 +130,12 @@ class TestFilterKnown:
         seen = _row(day=22)
         fresh = _row(day=23)
         known = {guard.row_hash(seen, account_id=ACCOUNT)}
-        kept = guard.filter_known([seen, fresh], known)
+        kept = guard.filter_known([seen, fresh], known, account_id=ACCOUNT)
         assert kept == [fresh]
 
     def test_nothing_known_keeps_everything(self, guard: DedupeGuard) -> None:
         rows = [_row(day=22), _row(day=23)]
-        assert guard.filter_known(rows, set()) == rows
+        assert guard.filter_known(rows, set(), account_id=ACCOUNT) == rows
 
     @pytest.mark.p0
     def test_two_identical_rows_within_one_statement_are_both_kept(
@@ -147,4 +147,17 @@ class TestFilterKnown:
         function only removes rows already imported from another statement.
         """
         rows = [_row(), _row()]
-        assert len(guard.filter_known(rows, set())) == 2
+        assert len(guard.filter_known(rows, set(), account_id=ACCOUNT)) == 2
+
+    @pytest.mark.p0
+    def test_a_row_known_on_another_account_is_not_dropped(
+        self, guard: DedupeGuard
+    ) -> None:
+        """``known_hashes`` is scoped to one account.
+
+        The same row hashed under a different account must not suppress it
+        here, or a genuine charge on a second card silently disappears.
+        """
+        row = _row()
+        known = {guard.row_hash(row, account_id=OTHER_ACCOUNT)}
+        assert guard.filter_known([row], known, account_id=ACCOUNT) == [row]

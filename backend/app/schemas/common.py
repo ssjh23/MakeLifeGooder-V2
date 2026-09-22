@@ -25,7 +25,15 @@ Last4 = Annotated[str, Field(pattern=r"^\d{4}$", examples=["4429"])]
 
 
 class Schema(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    # extra="forbid": a request carrying a field the schema does not declare
+    # is rejected (400) rather than silently dropped. CardCreate is the
+    # sharpest case -- there is no field anywhere for a full number, an
+    # expiry or a CVV, so accepting one and ignoring it would look like
+    # success to the caller while storing nothing (TC-CARD-002, TC-CARD-003).
+    # Harmless for response models built with model_validate(some_orm_row):
+    # from_attributes reads only the fields it knows about, so this only
+    # ever bites untrusted request bodies, which is the point.
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True, extra="forbid")
 
 
 class ErrorDetail(Schema):

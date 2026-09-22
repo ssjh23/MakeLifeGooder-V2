@@ -13,8 +13,10 @@ from app.schemas.review import (
     ConfirmAllRequest,
     DuplicatePair,
     ImportSummary,
+    MergeDescriptorRequest,
     ResolveDuplicateRequest,
     ReviewBoard,
+    SplitDescriptorRequest,
 )
 from app.services.review import ReviewService
 
@@ -83,6 +85,40 @@ async def classify_merchant(
         new_category_name=payload.new_category_name,
         create_rule=payload.create_rule,
         scope=payload.scope,
+        pattern=payload.pattern,
+        match_type=payload.match_type,
+        options=payload.options,
+    )
+    return {"status": "ok"}
+
+
+@router.post("/review/merchants/{descriptor_key}/split")
+async def split_merchant_descriptor(
+    descriptor_key: str, payload: SplitDescriptorRequest, service: ServiceDep
+) -> dict[str, str]:
+    """Eject one exact raw line out of a wrongly-merged group.
+
+    409 if this raw text was already split before; 400 if it doesn't
+    actually belong to the named group.
+    """
+    new_key = await service.split_descriptor(
+        descriptor_key, description_raw=payload.description_raw
+    )
+    return {"status": "ok", "descriptor_key": new_key}
+
+
+@router.post("/review/merchants/{descriptor_key}/merge")
+async def merge_merchant_descriptor(
+    descriptor_key: str, payload: MergeDescriptorRequest, service: ServiceDep
+) -> dict[str, str]:
+    """Fold a merchant group into another, existing one -- the inverse of
+    split, for two descriptors normalise() failed to unify.
+
+    400 if the source and target name the same group; 404 if either group
+    has no rows.
+    """
+    await service.merge_descriptors(
+        descriptor_key, target_descriptor_key=payload.target_descriptor_key
     )
     return {"status": "ok"}
 

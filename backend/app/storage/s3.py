@@ -21,7 +21,7 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
-from app.storage.base import PresignedUpload
+from app.storage.base import PresignedUpload, derive_object_key
 
 if TYPE_CHECKING:
     from app.config import Settings
@@ -80,7 +80,7 @@ class S3ObjectStore:
             raise UploadRejected(f"size {size_bytes} is outside the accepted range")
 
         upload_id = uuid.uuid4().hex
-        key = f"uploads/{upload_id}.pdf"
+        key = derive_object_key(upload_id)
         expires_in = self._settings.s3_presign_expiry_seconds
 
         params: dict[str, Any] = {
@@ -127,6 +127,17 @@ class S3ObjectStore:
         response = self._internal.get_object(Bucket=self._bucket, Key=key)
         body: bytes = response["Body"].read()
         return body
+
+    def put_bytes(self, *, key: str, data: bytes, content_type: str) -> None:
+        params: dict[str, Any] = {
+            "Bucket": self._bucket,
+            "Key": key,
+            "Body": data,
+            "ContentType": content_type,
+        }
+        if self._settings.s3_server_side_encryption:
+            params["ServerSideEncryption"] = self._settings.s3_server_side_encryption
+        self._internal.put_object(**params)
 
     def exists(self, *, key: str) -> bool:
         try:

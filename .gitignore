@@ -12,10 +12,16 @@ htmlcov/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 
 # Environment
 .env
 .env.local
+
+# Claude Code local tool/skill installs -- not project source
+.claude/
+.agents/
+skills-lock.json
 
 # Fixture statements are real bank documents. Never commit them.
 # The manifest and generated failure shapes are committed; the PDFs are not.

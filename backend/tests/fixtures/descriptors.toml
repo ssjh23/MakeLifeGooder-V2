@@ -68,3 +68,28 @@ why = "Trailing reference number."
 raw = "7-ELEVEN 2245"
 key = "7-eleven"
 why = "A digit and hyphen are part of the name here, not noise. The hard case for an aggressive rule."
+
+[[case]]
+raw = "BUS/MRT 765695553 SINGAPORE Ref No. : 7454183536288096046025"
+key = "bus mrt"
+why = "Transit statement line: a fresh per-ride id printed mid-descriptor, between the marker and the words that follow it, not at the end -- TRAILING_NOISE alone never reaches it. Every ride must converge to one key, or every tap becomes a new merchant. 'Singapore' immediately before 'Ref No.' is settlement-country boilerplate, not part of the name, so it goes with the reference."
+
+[[case]]
+raw = "BUS/MRT 764142284 SINGAPORE Ref No. : 7454183536288083715296"
+key = "bus mrt"
+why = "A second ride, different ride id and reference number, same merchant -- must match the case above exactly."
+
+[[case]]
+raw = "7-ELEVEN-1 CHANGI BIZ PK Singapore Ref No. : 74556225356107698754792"
+key = "7-eleven-1 changi biz pk"
+why = "A general 'Ref No.' field, distinct from the transit id above: it trails many different merchants' lines, always as a bank-assigned reference, never part of any merchant's own identity. 'Singapore' directly in front of it is stripped with it, same reasoning as the transit case."
+
+[[case]]
+raw = "SHABUSAI - CHANGI CITY POINT Singapore Ref No. : 74508985350022554012512"
+key = "shabusai changi city point"
+why = "Same 'Ref No.' field on an unrelated merchant, confirming the rule is general rather than tied to one marker."
+
+[[case]]
+raw = "SHABUSAI - CHANGI CITY POINT Singapore Ref No. : 99912345678900000000001"
+key = "shabusai changi city point"
+why = "Same merchant, a totally different reference number -- must converge to the same key as the case above, or every occurrence of a repeat merchant looks like a new one."

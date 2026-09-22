@@ -79,6 +79,57 @@ class RuleConflict(Conflict):
     code = "rule_conflict"
 
 
+class DuplicateFileUpload(Conflict):
+    """The exact same file was already uploaded (screen 03's warning).
+
+    ``details`` carries ``existing_statement_id`` and ``resolutions``:
+    replace or cancel. Unlike ``AlreadyImported``'s ``keep_both``, there is
+    no legitimate reason to keep two statements built from byte-identical
+    files, so that option doesn't exist here.
+    """
+
+    code = "duplicate_file_upload"
+
+
+class CategoryAlreadyExists(Conflict):
+    """The tenant already has a category at this slug (screen 04b's "+ New
+    category").
+
+    ``uq_categories_user_id_slug`` would catch this at the database level
+    regardless, but as a raw ``IntegrityError`` rather than a response a
+    client can act on -- this is the checked-first version, with
+    ``existing_category_id`` in ``details`` so the client can offer to use
+    it instead of asking the person to rename theirs.
+    """
+
+    code = "category_already_exists"
+
+
+class DescriptorAlreadySplit(Conflict):
+    """This raw descriptor already has its own override (screen 04's
+    evidence list).
+
+    ``details`` carries the ``descriptor_key`` the earlier split already
+    produced, checked first rather than caught after because a second split
+    is meaningless, not a database collision to translate.
+    """
+
+    code = "descriptor_already_split"
+
+
+class DescriptorNotInGroup(LedgerError):
+    """The raw text named in a split request isn't actually part of the
+    merchant group ``descriptor_key`` names. Right shape, wrong pairing."""
+
+    code = "descriptor_not_in_group"
+
+
+class CannotMergeIntoSelf(LedgerError):
+    """A merge's source and target named the same merchant group."""
+
+    code = "cannot_merge_into_self"
+
+
 class InvalidState(LedgerError):
     """Right shape, wrong state."""
 
@@ -108,6 +159,33 @@ class ReviewIncomplete(InvalidState):
 class RateLimited(LedgerError):
     status_code = status.HTTP_429_TOO_MANY_REQUESTS
     code = "rate_limited"
+
+
+class OidcNotConfigured(LedgerError):
+    """No Auth0 application is configured for this environment (ADR-008).
+
+    Every local dev box and the test suite run this way by design -- the
+    point of the seam is that the whole product works with no external
+    identity provider. A clear 503 here beats the SDK's own
+    ``ConfigurationError`` surfacing as an unexplained 500.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "oidc_not_configured"
+
+
+class OidcUpstreamError(LedgerError):
+    """Auth0 itself failed or refused the request.
+
+    Distinct from :class:`OidcNotConfigured`: the application *is*
+    configured, but the identity provider could not complete this attempt
+    (network failure, bad credentials, a rejected authorization request). 502
+    rather than 503, because the fault is the upstream's, not a gap in this
+    deployment's setup.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "oidc_upstream_error"
 
 
 class Unauthenticated(LedgerError):
@@ -161,12 +239,17 @@ def register_exception_handlers(app: FastAPI) -> None:
         # reserves for invalid *state*. A malformed body is 400, so the two
         # stay distinguishable by a client.
         request_id = getattr(request.state, "request_id", None)
+        # A custom validator (e.g. Schema's "exactly one of X or Y") can put
+        # the raw exception it raised into an error's `ctx`, which json.dumps
+        # cannot serialise. The message already states the problem in words;
+        # dropping `ctx` loses nothing a client could act on.
+        errors = [{k: v for k, v in error.items() if k != "ctx"} for error in exc.errors()]
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content=_envelope(
                 code="malformed_request",
                 message="The request body or parameters are not valid.",
-                details={"errors": exc.errors()},
+                details={"errors": errors},
                 request_id=request_id,
             ),
             headers={"X-Request-ID": request_id} if request_id else None,

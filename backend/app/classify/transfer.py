@@ -66,7 +66,15 @@ def is_person_transfer(descriptor: str) -> bool:
          excludes everything satisfies the privacy rule and destroys the
          product.
     """
-    raise NotImplementedError
+    if not descriptor or descriptor.isspace():
+        return False
+
+    for marker in TRANSFER_MARKERS:
+        if marker in descriptor:
+            fragment = descriptor.split(marker, 1)[1].strip()
+            return _looks_like_person_name(fragment)
+
+    return False
 
 
 def _looks_like_person_name(fragment: str) -> bool:
@@ -84,4 +92,15 @@ def _looks_like_person_name(fragment: str) -> bool:
          whether a stranger's name leaves the system, and a rule nobody can
          articulate cannot be reviewed.
     """
-    raise NotImplementedError
+    if not fragment or fragment.isspace():
+        return False
+
+    words = fragment.split()
+    if len(words) < 2:
+        return False
+
+    for word in words:
+        if word.upper() in {"PTE", "LTD", "LLP"}:
+            return False
+
+    return True

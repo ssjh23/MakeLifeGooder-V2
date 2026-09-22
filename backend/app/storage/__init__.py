@@ -1,4 +1,4 @@
-from app.storage.base import ObjectStore, PresignedUpload
+from app.storage.base import ObjectStore, PresignedUpload, derive_object_key
 from app.storage.s3 import S3ObjectStore, UploadRejected, build_object_store
 
 __all__ = [
@@ -7,4 +7,5 @@ __all__ = [
     "S3ObjectStore",
     "UploadRejected",
     "build_object_store",
+    "derive_object_key",
 ]

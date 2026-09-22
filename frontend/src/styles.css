@@ -1,13 +1,27 @@
-/* Deliberately plain. Visual design is not what this scaffold is for, and a
-   half-finished design system would be harder to replace than none. */
+/* Ledger's visual design, matched to the Notion wireframes (Wireframe / UI
+   sketch / Prototype screenshots, screens 00-08c): a flat, hard-edged,
+   ledger-paper aesthetic. One accent colour, sharp corners everywhere, a
+   monospace face for anything structural or tabular, a bold sans for
+   statements. Colours below were sampled directly from the wireframe PNGs,
+   not eyeballed. */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap");
 
 :root {
-  --ink: #1a1a1a;
+  --ink: #0a0a0a;
   --muted: #6b6b6b;
-  --line: #e2e2e2;
-  --accent: #3c7fc0;
-  --error: #b3261e;
-  --bg: #fbfbfb;
+  --line: #d9d7d7;
+  --line-strong: #000;
+  --accent: #ec3013;
+  --accent-tint: #ffe0d9;
+  --accent-ink: #8a1c0c;
+  --error: #ec3013;
+  --success: #1a7f4b;
+  --bg: #f3f2f2;
+  --surface: #fff;
+  --input-bg: #ececea;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --font-sans: -apple-system, "Segoe UI", system-ui, sans-serif;
   color-scheme: light;
 }
 
@@ -19,42 +33,65 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 15px/1.55 var(--font-sans);
 }
 
 code {
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: 0.9em;
-  background: #f0f0f0;
-  padding: 0.1em 0.35em;
-  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--input-bg);
+  padding: 0.1em 0.4em;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* :where() keeps this at the same (near-zero) specificity as the plain `a`
+   rule above, so any component class (.button, .tab, ...) always wins
+   without needing its own :not() exception here -- a chain of :not()s would
+   only cover classes we remembered to add, and silently miss the next one. */
+a:where(:visited) {
+  color: var(--accent);
 }
 
 .app {
-  max-width: 860px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 0 24px 64px;
 }
 
+/* -- Nav ----------------------------------------------------------------- */
+
 .nav {
   display: flex;
-  gap: 4px;
   align-items: center;
-  border-bottom: 1px solid var(--line);
+  gap: 4px;
+  border-bottom: 2px solid var(--line-strong);
+  padding: 20px 0;
   margin-bottom: 32px;
-  padding: 16px 0;
+}
+
+.brand {
+  font: 700 15px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-right: 20px;
 }
 
 .nav-item {
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 4px 14px 20px;
+  margin-bottom: -20px;
   text-decoration: none;
   color: var(--ink);
+  font: 600 12px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
 }
 
 .nav-item--active {
-  background: var(--accent);
-  color: #fff;
+  border-bottom-color: var(--accent);
 }
 
 /* Inert, not hidden. Screen 02's copy promises these unlock later, and copy
@@ -62,21 +99,34 @@ code {
 .nav-item--locked {
   color: var(--muted);
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 .nav-item--right {
   margin-left: auto;
 }
 
+.nav .button--link {
+  font: 600 12px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 4px 0 20px 14px;
+  margin-bottom: -20px;
+  border-bottom: 2px solid transparent;
+}
+
+/* -- Type ----------------------------------------------------------------- */
+
 h1 {
-  font-size: 24px;
+  font: 700 26px/1.2 var(--font-sans);
+  letter-spacing: -0.01em;
   margin: 0 0 8px;
 }
 
 h2 {
-  font-size: 17px;
-  margin: 24px 0 8px;
+  font: 700 15px/1.3 var(--font-sans);
+  margin: 28px 0 10px;
 }
 
 .muted {
@@ -89,42 +139,517 @@ h2 {
 
 .dropzone {
   display: block;
-  border: 2px dashed var(--line);
-  border-radius: 10px;
-  padding: 32px;
+  border: 1px dashed var(--muted);
+  padding: 40px;
   text-align: center;
   cursor: pointer;
   margin: 24px 0;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  background: var(--input-bg);
 }
 
 .panel,
 .error-panel {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 20px;
-  background: #fff;
+  border: 1px solid var(--line-strong);
+  padding: 24px;
+  background: var(--surface);
 }
 
 .error-panel {
-  border-color: var(--error);
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
 }
 
 .facts {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 6px 20px;
+  gap: 8px 24px;
   margin: 0;
 }
 
 .facts dt {
+  font: 600 11px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--muted);
 }
 
 .facts dd {
   margin: 0;
+  font-family: var(--font-mono);
 }
 
 .endpoints {
   padding-left: 18px;
   line-height: 2;
+}
+
+/* -- Forms ----------------------------------------------------------- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 420px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font: 600 11px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.field input,
+.field select,
+.field textarea {
+  font: 14px/1.4 var(--font-sans);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--input-bg);
+  color: var(--ink);
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  background: var(--surface);
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field-row {
+  display: flex;
+  gap: 12px;
+}
+
+.field-row > .field {
+  flex: 1;
+}
+
+.checkbox-field {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-field label {
+  color: var(--ink);
+  font: 15px var(--font-sans);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* -- Auth split screen (00, 01) ------------------------------------------ */
+
+.auth-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line-strong);
+  margin-top: 24px;
+}
+
+.auth-hero {
+  background: var(--accent);
+  color: #fff;
+  padding: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  min-height: 460px;
+}
+
+.auth-hero .brand {
+  color: #fff;
+}
+
+.auth-hero h1 {
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.auth-hero p {
+  margin: 0;
+  max-width: 32ch;
+}
+
+.auth-hero-foot {
+  margin-top: auto;
+  font: 12px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+.auth-panel {
+  background: var(--bg);
+  padding: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .auth-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-hero {
+    display: none;
+  }
+}
+
+/* -- Buttons ----------------------------------------------------------- */
+
+button,
+.button {
+  font: 600 13px/1 var(--font-mono);
+  letter-spacing: 0.02em;
+  padding: 11px 18px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+button:hover,
+.button:hover {
+  background: var(--input-bg);
+}
+
+button:disabled,
+.button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.button--primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.button--primary:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 35%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 35%, #fff);
+  color: #fff;
+}
+
+.button--danger {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--surface);
+}
+
+.button--danger:hover {
+  background: var(--accent-tint);
+}
+
+.button--danger.button--primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.button--link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: 600 13px var(--font-sans);
+  letter-spacing: normal;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* -- Layout ------------------------------------------------------------ */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.card-tile {
+  display: block;
+  border: 1px solid var(--line-strong);
+  padding: 16px;
+  background: var(--surface);
+  border-top: 4px solid var(--accent);
+  transition: border-color 0.1s ease;
+}
+
+.card-tile:hover,
+.card-tile:focus-visible {
+  border-color: var(--ink);
+}
+
+.card-tile:hover .card-tile-edit-hint {
+  color: var(--accent-ink);
+}
+
+.card-tile--archived {
+  opacity: 0.55;
+  border-top-color: var(--line);
+}
+
+/* The one visible cue that a tile is a link, not a static summary card --
+   the tile itself intentionally strips the browser's own link styling
+   (colour, underline) so the layout reads as a card, not a paragraph. */
+.card-tile-edit-hint {
+  margin-top: 10px;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+/* -- Data display -------------------------------------------------------- */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th {
+  text-align: left;
+  padding: 10px 12px;
+  font: 600 11px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  border-bottom: 2px solid var(--line-strong);
+}
+
+.table td {
+  text-align: left;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.table tr.is-skipped td {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.amount--negative {
+  color: var(--accent);
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  font: 600 11px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface);
+}
+
+.badge--accent {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.badge--muted {
+  background: var(--input-bg);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.banner {
+  border: 1px solid var(--accent);
+  padding: 14px 18px;
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+}
+
+.banner--locked {
+  background: var(--input-bg);
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+
+/* One deliberate exception to the zero-border-radius, zero-animation rule:
+   a live "still working" signal reads faster as motion than as text alone. */
+.pulse-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 6px;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.list-item {
+  border: 1px solid var(--line-strong);
+  padding: 12px 14px;
+  background: var(--surface);
+}
+
+/* Landed on from a link elsewhere (e.g. a rule collision), so this one row
+   doesn't have to be found by scanning the rest of the list. */
+.list-item--highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+
+/* box-shadow on a <tr> is unreliable with border-collapse: collapse (the
+   .table default), so a table row gets a background highlight instead. */
+.table tr.list-item--highlighted {
+  background: var(--accent-tint);
+}
+.table tr.list-item--highlighted td {
+  border-bottom-color: var(--accent);
+}
+
+/* -- Dialog ------------------------------------------------------------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px;
+  z-index: 10;
+}
+
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  padding: 24px;
+  max-width: 480px;
+  width: 100%;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 8px 16px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font: 600 12px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid var(--line-strong);
+  margin: 8px 0;
+}
+
+/* -- Dashboard bars ------------------------------------------------------ */
+
+.bar-track {
+  margin-top: 4px;
+  height: 6px;
+  background: var(--input-bg);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: var(--ink);
+}
+
+.change-positive {
+  color: var(--accent);
+}
+
+.change-negative {
+  color: var(--success);
 }

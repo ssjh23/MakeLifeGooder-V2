@@ -17,6 +17,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from typing import cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -63,6 +64,18 @@ def get_engine(settings: Settings | None = None) -> AsyncEngine:
     )
 
 
+async def current_tenant_id(session: AsyncSession) -> uuid.UUID:
+    """The ``app.user_id`` :func:`tenant_session` set with ``SET LOCAL``.
+
+    For the rare caller that has to hand the tenant off somewhere RLS cannot
+    follow it -- a job payload, which is read back by a worker process on a
+    connection of its own. Everything else should keep relying on RLS rather
+    than reading this back out.
+    """
+    result = await session.execute(text("SELECT current_setting('app.user_id')::uuid"))
+    return cast(uuid.UUID, result.scalar_one())
+
+
 @lru_cache
 def get_worker_engine(settings: Settings | None = None) -> AsyncEngine:
     """Engine used by the worker. Connects directly to Postgres.
@@ -84,6 +97,17 @@ def get_worker_engine(settings: Settings | None = None) -> AsyncEngine:
 
 def get_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+
+
+@lru_cache
+def get_worker_sessionmaker() -> async_sessionmaker[AsyncSession]:
+    """The worker's own sessionmaker, direct to Postgres, cached like the API's.
+
+    A worker task knows only ``statement_id`` and (per ``register()``, so the
+    task can reach ``tenant_session`` before it has queried anything) the
+    tenant's ``user_id``. This is what it opens that tenant session against.
+    """
+    return get_sessionmaker(get_worker_engine())
 
 
 @asynccontextmanager

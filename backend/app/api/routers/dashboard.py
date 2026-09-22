@@ -51,8 +51,22 @@ async def list_transactions(
     merchant_id: uuid.UUID | None = None,
     from_: date | None = Query(default=None, alias="from"),
     to: date | None = None,
+    search: str | None = None,
+    sort: Annotated[
+        Literal["date_desc", "date_asc", "amount_desc", "amount_asc"], Query()
+    ] = "date_desc",
 ) -> list[TransactionResponse]:
-    raise NotImplementedError("Transaction listing is not written yet.")
+    """Screen 06's individual-transactions band (05): search, sort, and every
+    filter the wireframe's dropdowns need, all server-side."""
+    return await service.list_transactions(
+        category_id=category_id,
+        card_id=card_id,
+        merchant_id=merchant_id,
+        from_=from_,
+        to=to,
+        search=search,
+        sort=sort,
+    )
 
 
 @router.get("/transactions/{transaction_id}", response_model=TransactionResponse)

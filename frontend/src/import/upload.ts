@@ -29,7 +29,8 @@ export interface UploadResult {
 /** Ask the API for permission to write one object. */
 export async function requestUploadUrl(file: File) {
   const { data, response } = await api.POST("/api/v1/statements/upload-url", {
-    body: { content_type: file.type || "application/pdf", size_bytes: file.size },
+    // The only content type the API will register a statement for.
+    body: { content_type: "application/pdf", size_bytes: file.size },
   });
   if (!data) throw await toApiError(response);
   return data;
@@ -67,11 +68,4 @@ export async function registerStatement(uploadId: string, cardId?: string) {
   });
   if (!data) throw await toApiError(response);
   return data;
-}
-
-/** The whole upload path, in the order the sequence diagram gives it. */
-export async function uploadStatement(file: File, cardId?: string) {
-  const presigned = await requestUploadUrl(file);
-  await putToStorage(file, presigned);
-  return registerStatement(presigned.upload_id, cardId);
 }

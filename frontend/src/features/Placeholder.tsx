@@ -10,7 +10,7 @@
 interface Props {
   screen: string;
   title: string;
-  endpoints: string[];
+  endpoints: readonly string[];
   note?: string;
 }
 

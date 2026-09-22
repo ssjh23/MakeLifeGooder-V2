@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.extract.base import ParsedStatement
+from app.money import sum_minor
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +66,18 @@ class Reconciler:
 
         See TC-REC-004, TC-REC-008.
         """
-        raise NotImplementedError
+        extracted_total_minor = sum_minor(row.amount_minor for row in parsed.rows)
+        printed_total_minor = parsed.printed_total_minor
+        difference_minor = printed_total_minor - extracted_total_minor if printed_total_minor is not None else 0
+        reconciled = printed_total_minor is not None and difference_minor == 0
+
+        return ReconcileResult(
+            extracted_total_minor=extracted_total_minor,
+            printed_total_minor=printed_total_minor,
+            difference_minor=difference_minor,
+            reconciled=reconciled,
+            currency=parsed.currency,
+        )
 
     def apply_gap(self, result: ReconcileResult, *, reason: str) -> ReconcileResult:
         """Record an accepted gap.
@@ -83,7 +95,16 @@ class Reconciler:
           3. Require a non-empty ``reason``. An unexplained gap is
              indistinguishable from a bug six months later.
         """
-        raise NotImplementedError
+        if not reason:
+            raise ValueError("reason must be non-empty")
+
+        return ReconcileResult(
+            extracted_total_minor=result.extracted_total_minor,
+            printed_total_minor=result.printed_total_minor,
+            difference_minor=result.difference_minor,
+            reconciled=False,
+            currency=result.currency,
+        )
 
     def assert_committable(self, result: ReconcileResult, *, accept_gap: bool) -> None:
         """Raise unless this statement may be committed.
@@ -101,4 +122,19 @@ class Reconciler:
         is what TC-REC-003 checks by calling the endpoint directly with the
         frontend out of the picture.
         """
-        raise NotImplementedError
+        if result.reconciled:
+            return
+
+        if accept_gap and not result.reconciled:
+            return
+
+        from app.api.errors import NotReconciled
+        from app.money import to_decimal_string
+
+        raise NotReconciled(
+            "Extracted rows do not sum to the printed total.",
+            details={
+                "difference": to_decimal_string(result.difference_minor, result.currency),
+                "currency": result.currency,
+            },
+        )

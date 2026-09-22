@@ -11,11 +11,27 @@ getting it running.
 
 ## Status
 
-Scaffold. Every seam is wired and the plumbing tests pass. The business logic
-is not written: the four gates, the classification cascade, the descriptor
-normaliser and the service methods raise `NotImplementedError` and have failing
-tests that define what correct looks like. **A red suite is the expected state**,
-and the count of red tests is the work remaining.
+Implemented, uncommitted. The four gates, the classification cascade, the
+descriptor normaliser and the service methods are written. `git log` on this
+checkout still shows only the initial commit — everything described below is
+in the working tree, not on a branch yet.
+
+`uv run pytest` currently reports **388 passed, 3 failed, 1 skipped**:
+
+- One real bug: a tampered session cookie is accepted (200) instead of
+  rejected (401) — `TC_AUTH_010`, worth fixing before this commits.
+- Two status-code mismatches in the OIDC-not-configured tests (expect 503,
+  get 401) — looks like a route/dependency ordering issue, not a design
+  disagreement.
+
+Two things remain genuinely unwritten, both already called out as deferred:
+manual row entry for unreadable scans, and password reset delivery. A third
+gap is narrower than it looks — `pdfplumber_parser.py` handles
+password-protection, missing-text-layer and non-statement detection, then
+stops before column inference, because that step needs real bank statement
+fixtures (see Fixture statements below) and nothing later depends on it.
+`monopoly-core` is a hard dependency now, not optional, and covers the
+supported-bank happy path without needing that fallback.
 
 ## Prerequisites
 
@@ -66,22 +82,34 @@ Then open http://localhost:5173.
 
 ## What "working" looks like right now
 
-Upload any PDF on the import screen. With no logic written, the correct outcome
-is a **failure**, and the path it takes is the proof that the architecture is
-wired:
+Upload a real statement PDF from a bank `monopoly-core` supports (DBS/POSB,
+OCBC, UOB, Standard Chartered, HSBC, Citibank, Maybank, Trust) and the whole
+path runs end to end: presigned upload to MinIO, extract, reconcile against
+the printed total, classify through the cascade, review, commit, and the
+dashboard reflects it. That path is what the 388 passing tests exercise.
+
+The one path that still fails on purpose is a PDF from a bank Monopoly
+doesn't cover, since the pdfplumber fallback parser isn't wired into the
+registry yet:
 
 1. The browser uploads straight to MinIO with a presigned URL. The API never
    sees the bytes.
 2. A statement row appears as `pending` and a job is enqueued in the same
    transaction.
 3. The worker claims it and logs `statement.extract.started`.
-4. Extraction raises `NotImplementedError`, the job dead-letters, and the row
-   becomes `failed` with `last_error`.
+4. The parser registry has nowhere left to route to, the job dead-letters,
+   and the row becomes `failed` with `last_error`.
 5. The UI polls to `failed` and shows a request id.
 
 Every log line in steps 2 to 4 carries the same `trace_id` the API returned in
 step 2. If that holds, the async hop is instrumented correctly, which is the
 one piece of observability that cannot be retrofitted cheaply.
+
+Auth0 env vars (`AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`,
+`AUTH0_REDIRECT_URI` in `.env.example`) are optional for local dev — leave
+them blank and `/auth/register` + `/auth/login` (password auth) still work;
+the `/auth/oidc/*` routes return a clean error rather than a crash until
+they're set.
 
 ## Ports
 

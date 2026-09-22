@@ -13,6 +13,19 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+def derive_object_key(upload_id: str) -> str:
+    """The storage key a given ``upload_id`` was signed for.
+
+    A pure function of ``upload_id`` rather than a lookup, and deliberately
+    the *same* formula :meth:`~app.storage.s3.S3ObjectStore.presign_upload`
+    used to build the key in the first place: the API only ever receives
+    ``upload_id`` from the client (never ``key``), so recomputing it here is
+    what lets ``register`` confirm the object exists without trusting a
+    client-supplied path into the bucket.
+    """
+    return f"uploads/{upload_id}.pdf"
+
+
 @dataclass(frozen=True, slots=True)
 class PresignedUpload:
     """A short-lived permission to write exactly one object.
@@ -42,6 +55,14 @@ class ObjectStore(Protocol):
 
     def get_bytes(self, *, key: str) -> bytes:
         """Fetch an object. The worker uses this; the API tier does not."""
+        ...
+
+    def put_bytes(self, *, key: str, data: bytes, content_type: str) -> None:
+        """Write an object the server itself generated -- an export CSV, not
+        a statement PDF. Statement uploads stay browser-to-bucket; this is
+        the one path where the API is the one holding the bytes already, and
+        proxying them through a presigned URL back to itself would buy
+        nothing (BUILD STEP 9.3)."""
         ...
 
     def exists(self, *, key: str) -> bool:

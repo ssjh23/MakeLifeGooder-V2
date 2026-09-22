@@ -36,9 +36,14 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from app.classify.llm.base import LLMAdapter
+from app.classify.alias import AliasWriter
+from app.classify.llm.base import LLMAdapter, LLMUnavailable
 from app.classify.transfer import is_person_transfer
-from app.db.repositories import MerchantRepository
+from app.db.models import AliasSource
+from app.db.repositories import CategoryRepository, MerchantRepository
+from app.telemetry import events, get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,12 +60,21 @@ class CascadeResolver:
     def __init__(
         self,
         merchants: MerchantRepository,
+        categories: CategoryRepository,
+        alias_writer: AliasWriter,
         llm: LLMAdapter,
         *,
         trgm_threshold: float = 0.4,
     ) -> None:
         self._merchants = merchants
-        self._llm = llm
+        self._categories = categories
+        self._alias_writer = alias_writer
+        #: Named distinctly from the ``_llm`` *method* below -- the two would
+        #: otherwise collide, since an instance attribute set in __init__
+        #: shadows a same-named method on every subsequent ``self._llm``
+        #: lookup, silently turning ``self._llm(...)`` into "call the adapter
+        #: object" instead of "call this rung".
+        self._llm_adapter = llm
         self._threshold = trgm_threshold
 
     async def resolve_many(self, descriptor_keys: list[str]) -> dict[str, Resolution]:
@@ -93,58 +107,130 @@ class CascadeResolver:
         Batched rather than per row, which is what keeps rung four to a couple
         of calls per statement instead of one per transaction.
         """
-        raise NotImplementedError
+        resolutions: dict[str, Resolution] = {}
+        remaining: list[str] = []
+
+        for descriptor_key in descriptor_keys:
+            if self._excluded(descriptor_key):
+                continue
+
+            resolution = await self._override(descriptor_key)
+            if resolution is None:
+                resolution = await self._alias(descriptor_key)
+            if resolution is None:
+                resolution = await self._trgm(descriptor_key)
+
+            if resolution is not None:
+                resolutions[descriptor_key] = resolution
+            else:
+                remaining.append(descriptor_key)
+
+        if remaining:
+            resolutions.update(await self._llm(remaining))
+
+        return resolutions
 
     async def _override(self, descriptor_key: str) -> Resolution | None:
-        """Rung one. A person's own decision beats everything, always.
-
-        TODO: call ``find_override``; on a hit return a Resolution with
-        ``rung="override"`` and no confidence, because a person's decision is
-        not a probability.
-        """
-        raise NotImplementedError
+        """Rung one. A person's own decision beats everything, always."""
+        merchant_id = await self._merchants.find_override(descriptor_key)
+        if merchant_id is None:
+            return None
+        return await self._resolution_for(merchant_id, rung="override", confidence=None)
 
     async def _alias(self, descriptor_key: str) -> Resolution | None:
-        """Rung two.
-
-        TODO: call ``find_alias``; on a hit return ``rung="alias"``. One
-        indexed read, which is what the global uniqueness of ``descriptor_key``
-        is for.
-        """
-        raise NotImplementedError
+        """Rung two. One indexed read: ``descriptor_key`` is globally unique,
+        which is what the global alias cache buys."""
+        merchant_id = await self._merchants.find_alias(descriptor_key)
+        if merchant_id is None:
+            return None
+        return await self._resolution_for(merchant_id, rung="alias", confidence=None)
 
     async def _trgm(self, descriptor_key: str) -> Resolution | None:
         """Rung three. Trigram similarity above the threshold.
 
-        TODO:
-          1. Call ``find_similar`` with ``self._threshold``.
-          2. Return ``rung="merchant_default"`` with the similarity score as
-             ``confidence``, so a weak match can be routed to review.
-          3. Tune the threshold against real descriptors. It is a real
-             decision: too low and unrelated merchants merge, too high and the
-             rung never fires and every near miss becomes a paid call.
-
         String similarity, deliberately, not semantic similarity.
         """
-        raise NotImplementedError
+        match = await self._merchants.find_similar_with_score(descriptor_key, self._threshold)
+        if match is None:
+            return None
+        merchant_id, score = match
+        return await self._resolution_for(
+            merchant_id, rung="merchant_default", confidence=score
+        )
 
     async def _llm(self, descriptor_keys: list[str]) -> dict[str, Resolution]:
         """Rung four. Only descriptors that reached here.
 
-        TODO for step 5.5:
-          1. Call ``self._llm.classify_batch``.
-          2. Map suggestions onto resolutions with ``rung="llm"`` and the
-             adapter's ``prompt_version``, which is what makes a later
-             reprocess of model-derived rows a query rather than a guess.
-          3. Let ``LLMUnavailable`` leave these descriptors unresolved. An
-             outage degrades classification; it never fails an import.
-          4. Accept a shorter result than the input. A descriptor the model
-             declined is simply absent, and nothing is invented to pad it.
-
         Only the normalised strings cross the boundary. No amounts, no dates,
         no PDF, no identity, nothing that ties a merchant to a person.
         """
-        raise NotImplementedError
+        try:
+            suggestions = await self._llm_adapter.classify_batch(descriptor_keys)
+        except LLMUnavailable:
+            # An outage degrades classification; it never fails an import
+            # (TC-REV-019). Rungs one to three already answered above, so
+            # only genuinely new merchants stay unresolved here.
+            logger.warning(events.LLM_UNAVAILABLE, descriptor_count=len(descriptor_keys))
+            return {}
+
+        requested = set(descriptor_keys)
+        resolutions: dict[str, Resolution] = {}
+        for suggestion in suggestions:
+            if suggestion.descriptor_key not in requested:
+                # A model returning something outside the batch is a signal,
+                # not data -- never write it as though it were asked for.
+                continue
+
+            category = await self._categories.find_by_slug(suggestion.category_slug)
+            # Reuse an existing merchant of the same name rather than always
+            # minting a new one: a normaliser gap (or the same chain phrased
+            # two different ways) can hand the model two different unseen
+            # descriptors for a merchant that already has a row, and without
+            # this check each one would get its own -- correctly named, but
+            # a second identity splitting that merchant's history in two.
+            merchant = await self._merchants.find_by_canonical_name(suggestion.canonical_name)
+            if merchant is None:
+                merchant = await self._merchants.create(
+                    canonical_name=suggestion.canonical_name,
+                    default_category_id=category.id if category is not None else None,
+                )
+            # So the next tenant to see this merchant pays nothing. Screened
+            # internally against a confidence floor -- a weak guess still
+            # classifies this row, once, but is not cached for anyone else.
+            await self._alias_writer.upsert(
+                descriptor_key=suggestion.descriptor_key,
+                merchant_id=merchant.id,
+                source=AliasSource.LLM.value,
+                confidence=suggestion.confidence,
+            )
+
+            resolutions[suggestion.descriptor_key] = Resolution(
+                merchant_id=merchant.id,
+                category_id=category.id if category is not None else None,
+                rung="llm",
+                confidence=suggestion.confidence,
+                prompt_version=self._llm_adapter.prompt_version,
+            )
+
+        return resolutions
+
+    async def _resolution_for(
+        self, merchant_id: uuid.UUID, *, rung: str, confidence: float | None
+    ) -> Resolution:
+        """The category a merchant carries once resolved, from its own
+        ``default_category_id``.
+
+        Known gap: a ``merchant_overrides`` row can independently carry its
+        own ``category_id`` with no ``merchant_id`` -- a category-only
+        correction -- and :meth:`~app.db.repositories.MerchantRepository.find_override`
+        does not surface that column, so :meth:`_override` cannot resolve one
+        yet. Flagged here rather than silently approximated.
+        """
+        merchant = await self._merchants.get(merchant_id)
+        category_id = merchant.default_category_id if merchant is not None else None
+        return Resolution(
+            merchant_id=merchant_id, category_id=category_id, rung=rung, confidence=confidence
+        )
 
     @staticmethod
     def _excluded(descriptor_key: str) -> bool:

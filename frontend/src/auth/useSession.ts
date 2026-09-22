@@ -32,7 +32,7 @@ export function useSession() {
       return {
         id: data.id,
         email: data.email,
-        name: data.name,
+        name: data.name ?? null,
         hasStatements: data.has_statements,
       };
     },

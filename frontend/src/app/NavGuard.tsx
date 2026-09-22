@@ -10,7 +10,8 @@
  * successful commit rather than the first upload.
  */
 
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useLogout } from "../auth/mutations";
 import { useSession } from "../auth/useSession";
 
 interface Tab {
@@ -30,10 +31,18 @@ const TABS: Tab[] = [
 
 export function NavGuard() {
   const { hasStatements, isSignedIn } = useSession();
+  const logout = useLogout();
+  const navigate = useNavigate();
   if (!isSignedIn) return null;
+
+  async function handleSignOut() {
+    await logout.mutateAsync();
+    navigate("/sign-in", { replace: true });
+  }
 
   return (
     <nav className="nav" aria-label="Main">
+      <span className="brand">Ledger</span>
       {TABS.map((tab) => {
         const locked = tab.needsData && !hasStatements;
         return locked ? (
@@ -58,6 +67,9 @@ export function NavGuard() {
       <NavLink to="/account" className="nav-item nav-item--right">
         Account
       </NavLink>
+      <button type="button" className="button--link" onClick={() => void handleSignOut()}>
+        Sign out
+      </button>
     </nav>
   );
 }

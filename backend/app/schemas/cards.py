@@ -33,10 +33,20 @@ class CardCreate(Schema):
 
 
 class CardUpdate(Schema):
-    """Rename and recolour only. Never touches statements (TC-CARD-005)."""
+    """Correct the label -- name, colour, last four digits or institution.
+    Never touches a statement (TC-CARD-005): correcting a card's own record
+    does not retroactively relabel history already committed under it.
+
+    ``last4`` and ``institution`` are corrections for a mistake made at
+    creation, not a reissue: :attr:`Card.replaced_by_id` is the intended path
+    for a genuinely new physical card, so its history stays linked rather
+    than silently overwritten here.
+    """
 
     nickname: str | None = Field(default=None, max_length=100)
     colour: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    last4: Last4 | None = None
+    institution: str | None = Field(default=None, max_length=100)
 
 
 class CardResponse(Schema):

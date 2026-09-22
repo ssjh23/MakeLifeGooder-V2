@@ -14,7 +14,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, SecretStr, field_validator
+from pydantic import PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["local", "test", "staging", "production"]
@@ -92,9 +92,23 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False
     password_min_length: int = 12
 
-    oidc_issuer: str | None = None
-    oidc_client_id: str | None = None
-    oidc_client_secret: SecretStr | None = None
+    # -- OIDC (Auth0) --------------------------------------------------------
+    #
+    # ADR-008 chose OIDC; Auth0 is the provider. ``app/api/oidc.py`` runs the
+    # Authorization Code + PKCE exchange in the SDK's Enterprise Connect mode,
+    # where Auth0 is a pure identity relay and issues no session of its own --
+    # this app's session cookie (below) is the only one that exists either
+    # way, which is what keeps password and Auth0 sign-in ending at the same
+    # place. Blank in local development, so the full suite and the password
+    # path run with no external identity provider configured.
+    auth0_domain: str | None = None
+    auth0_client_id: str | None = None
+    auth0_client_secret: SecretStr | None = None
+    #: Must exactly match an entry in the Auth0 application's Allowed Callback
+    #: URLs. Not derived from the incoming request: trusting a request-supplied
+    #: host for the redirect target used in a token exchange is an open
+    #: redirect waiting to happen.
+    auth0_redirect_uri: str = "http://localhost:8000/api/v1/auth/oidc/callback"
 
     # -- LLM ---------------------------------------------------------------
 
@@ -114,7 +128,12 @@ class Settings(BaseSettings):
 
     # -- Classification ----------------------------------------------------
 
-    trgm_similarity_threshold: float = 0.4
+    #: `pg_trgm` similarity floor for rung 3 (`merchant_default`) of the
+    #: cascade. 0.6 allows genuinely-similar variants (an outlet suffix or
+    #: reference number the normaliser missed) to auto-resolve here instead
+    #: of always paying for the LLM rung, at the cost of a looser match than
+    #: the stricter 0.95 this was set to earlier.
+    trgm_similarity_threshold: float = 0.6
 
     # -- Telemetry ---------------------------------------------------------
 
@@ -140,6 +159,17 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def oidc_configured(self) -> bool:
+        """Whether an Auth0 application is configured for this environment.
+
+        Checked before touching the SDK so an unconfigured environment (every
+        local dev box and the test suite, by design) gets a clear
+        ``oidc_not_configured`` error instead of the SDK's own
+        ``ConfigurationError`` surfacing as a 500.
+        """
+        return bool(self.auth0_domain and self.auth0_client_id and self.auth0_client_secret)
 
     @property
     def signing_endpoint(self) -> str | None:

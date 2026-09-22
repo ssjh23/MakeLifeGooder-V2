@@ -89,9 +89,25 @@ def migrated_database() -> Iterator[None]:
     yield
 
 
+#: Mirrors alembic/versions/0004_seed_categories.py. TRUNCATE below empties
+#: this table like every other, so each test needs it reseeded rather than
+#: relying on the one-time migration insert -- there is nowhere else for an
+#: LLM-suggested category_slug (BUILD STEP 5.5) to resolve against.
+SYSTEM_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ("food-drink", "Food & Drink"),
+    ("transport", "Transport"),
+    ("groceries", "Groceries"),
+    ("shopping", "Shopping"),
+    ("utilities", "Utilities"),
+    ("entertainment", "Entertainment"),
+    ("health", "Health"),
+    ("other", "Other"),
+)
+
+
 @pytest_asyncio.fixture
 async def clean_database(migrated_database: None) -> AsyncIterator[None]:
-    """Empty every table between tests.
+    """Empty every table between tests, then reseed system reference data.
 
     TRUNCATE as the owning role, because the application role cannot truncate
     and should not be able to. Restarting identities and cascading keeps the
@@ -112,6 +128,24 @@ async def clean_database(migrated_database: None) -> AsyncIterator[None]:
             await connection.execute(
                 text(f"TRUNCATE {', '.join(names)} RESTART IDENTITY CASCADE")
             )
+
+        # categories.tenant_isolation (0001_baseline) checks writes with the
+        # plain tenant PREDICATE, which a NULL user_id never satisfies, and
+        # FORCE ROW LEVEL SECURITY applies that to the owning role too -- so
+        # a system row can only be inserted with FORCE lifted, exactly as the
+        # seed migration does it.
+        await connection.execute(text("ALTER TABLE categories NO FORCE ROW LEVEL SECURITY"))
+        try:
+            for slug, name in SYSTEM_CATEGORIES:
+                await connection.execute(
+                    text(
+                        "INSERT INTO categories (slug, name, kind, is_system, user_id) "
+                        "VALUES (:slug, :name, 'expense', true, NULL)"
+                    ),
+                    {"slug": slug, "name": name},
+                )
+        finally:
+            await connection.execute(text("ALTER TABLE categories FORCE ROW LEVEL SECURITY"))
     await engine.dispose()
     yield
 
@@ -157,13 +191,22 @@ async def client(clean_database: None) -> AsyncIterator[AsyncClient]:
     middleware, dependency and exception-handler stack runs. A test that
     bypassed the app object would not exercise the session cookie, the request
     id or the error envelope, which are the parts most likely to break.
+
+    Driven through ``app.router.lifespan_context`` rather than a bare
+    ``ASGITransport``: ``httpx``'s transport never sends the ASGI lifespan
+    ``startup`` event on its own, and ``configure_telemetry()`` runs only
+    inside ``app/main.py``'s ``lifespan()``. Skip this and structlog and the
+    tracer provider are never configured, which does not error -- it silently
+    leaves every span a no-op, so ``trace_id`` is quietly ``None``
+    everywhere instead of surfacing as a failure at the one place it began.
     """
     from app.main import create_app
 
     app = create_app()
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as http:
-        yield http
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+            yield http
 
 
 @pytest_asyncio.fixture

@@ -59,7 +59,10 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    # MinIO's images are no longer published to Docker Hub; quay.io is the
+    # image source they moved to. Pinning latest here because dev
+    # infrastructure, not a deployed artifact.
+    image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -88,7 +91,7 @@ services:
   # the SPA origin. The equivalent step in AWS is a bucket CORS rule, and
   # forgetting it produces an opaque browser error rather than a useful one.
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     depends_on:
       minio:
         condition: service_healthy

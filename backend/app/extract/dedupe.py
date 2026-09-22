@@ -24,6 +24,7 @@ The last of the four gates that can be built with no database and no PDF.
 from __future__ import annotations
 
 from app.extract.base import ParsedRow
+import hashlib
 
 
 class DedupeGuard:
@@ -41,7 +42,7 @@ class DedupeGuard:
           2. Return ``digest()``, not ``hexdigest()``. The column is
              ``bytea(32)`` and the test checks the length.
         """
-        raise NotImplementedError
+        return hashlib.sha256(pdf_bytes).digest()
 
     def row_hash(self, row: ParsedRow, *, account_id: str) -> bytes:
         """A stable identity for one transaction.
@@ -75,10 +76,19 @@ class DedupeGuard:
         record seen twice, which is not a judgment call and is skipped silently
         (TC-TDUP-006).
         """
-        raise NotImplementedError
 
-    def filter_known(self, rows: list[ParsedRow], known_hashes: set[bytes]) -> list[ParsedRow]:
+        data = f"{account_id}|{row.posted_on}|{row.description_raw}|{row.amount_minor}".encode("utf-8")
+        return hashlib.sha256(data).digest()
+
+    def filter_known(
+        self, rows: list[ParsedRow], known_hashes: set[bytes], *, account_id: str
+    ) -> list[ParsedRow]:
         """Drop rows already present under another statement.
+
+        ``account_id`` is the account every row in this batch belongs to, not a
+        per-row field: a statement is always extracted for one account, and
+        :meth:`row_hash` needs it to scope the hash the same way it was scoped
+        when ``known_hashes`` was built.
 
         TODO:
           1. Keep every row whose :meth:`row_hash` is not in ``known_hashes``.
@@ -87,4 +97,8 @@ class DedupeGuard:
              user which it was. This function only removes rows already imported
              from a different statement.
         """
-        raise NotImplementedError
+        return [
+            row
+            for row in rows
+            if self.row_hash(row, account_id=account_id) not in known_hashes
+        ]

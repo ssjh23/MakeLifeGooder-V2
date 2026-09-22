@@ -23,8 +23,15 @@ model, and it is worth having early.
 from __future__ import annotations
 
 import uuid
+from typing import Final
 
+from app.classify.transfer import is_person_transfer
 from app.db.repositories import MerchantRepository
+
+#: Below this, a model guess is not the answer every future tenant should see.
+#: Confidence-less writes (``rule``, ``manual``) are exempt -- the threshold
+#: only screens a model's own uncertainty about itself.
+MIN_CONFIDENCE_TO_WRITE: Final[float] = 0.7
 
 
 class AliasWriter:
@@ -59,4 +66,20 @@ class AliasWriter:
         an alias: their opinion is theirs. Only a correction confident enough to
         be right for strangers belongs here.
         """
-        raise NotImplementedError
+        if not descriptor_key or descriptor_key.isspace():
+            raise ValueError("descriptor_key must be non-empty")
+
+        assert not is_person_transfer(descriptor_key), (
+            "a person-to-person transfer descriptor reached the alias writer; "
+            "the transfer filter must run before classification"
+        )
+
+        if confidence is not None and confidence < MIN_CONFIDENCE_TO_WRITE:
+            return
+
+        await self._merchants.upsert_alias(
+            descriptor_key=descriptor_key,
+            merchant_id=merchant_id,
+            source=source,
+            confidence=confidence,
+        )

@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from app.schemas.common import MoneyStr, Schema
+from app.schemas.rules import MatchTypeLiteral, RuleOptions
 
 ClassifiedByLiteral = Literal["override", "alias", "merchant_default", "llm"]
 MerchantStatusLiteral = Literal["rule_matched", "overridden", "new"]
@@ -39,6 +40,11 @@ class MerchantGroup(Schema):
     status: MerchantStatusLiteral
     suggested_category: SuggestedCategory | None = None
     classified_by: ClassifiedByLiteral | None = None
+    #: Set together, only when status == "rule_matched" -- which standing
+    #: rule decided this group's category, so the board can link to it
+    #: instead of just naming the fact.
+    rule_id: uuid.UUID | None = None
+    rule_pattern: str | None = None
 
 
 class ReviewFooter(Schema):
@@ -84,12 +90,33 @@ class ClassifyRequest(Schema):
     #: ``backfill`` restates history, and the dialog states how many past rows
     #: change before it happens.
     scope: Literal["future", "backfill"] = "future"
+    #: The same rule-authoring options the Rules screen's "New rule" form
+    #: offers (BUILD STEP 8.1), so a person isn't limited to an exact match
+    #: on this one descriptor just because they're creating the rule from
+    #: here instead of there. ``pattern`` defaults to the descriptor_key
+    #: being classified when omitted -- today's only behaviour, preserved.
+    pattern: str | None = Field(default=None, min_length=1, max_length=200)
+    match_type: MatchTypeLiteral = "exact"
+    options: RuleOptions = RuleOptions()
 
     @model_validator(mode="after")
     def _exactly_one_category(self) -> ClassifyRequest:
         if bool(self.category_id) == bool(self.new_category_name):
             raise ValueError("Provide exactly one of category_id or new_category_name.")
         return self
+
+
+class SplitDescriptorRequest(Schema):
+    """One exact raw line, picked out of a merchant group's evidence list."""
+
+    description_raw: str = Field(min_length=1)
+
+
+class MergeDescriptorRequest(Schema):
+    """Fold the named merchant group into an existing one -- the inverse of
+    a split, for a normaliser under-merge the split flow can't fix."""
+
+    target_descriptor_key: str = Field(min_length=1)
 
 
 class ConfirmAllRequest(Schema):

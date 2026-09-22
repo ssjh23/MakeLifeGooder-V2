@@ -7,10 +7,12 @@ recorded and then carried everywhere.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date
 
 import pytest
 
+from app.api.errors import NotReconciled
 from app.extract.base import ParsedRow, ParsedStatement
 from app.extract.reconcile import Reconciler
 
@@ -86,7 +88,7 @@ class TestCheck:
             amount_minor=5000,
             currency="USD",
         )
-        mixed = ParsedStatement(**{**statement.__dict__, "rows": [*statement.rows, foreign]})
+        mixed = dataclasses.replace(statement, rows=[*statement.rows, foreign])
         result = Reconciler().check(mixed)
         assert result.reconciled is False
 
@@ -95,8 +97,9 @@ class TestGate:
     @pytest.mark.p0
     def test_TC_REC_002_unreconciled_cannot_commit(self) -> None:
         result = Reconciler().check(_statement([17950], 18720))
-        with pytest.raises(Exception):  # noqa: B017 - the service maps this to 422
+        with pytest.raises(NotReconciled) as excinfo:
             Reconciler().assert_committable(result, accept_gap=False)
+        assert excinfo.value.details["difference"] == "7.70"
 
     @pytest.mark.p0
     def test_TC_REC_010_accepted_gap_commits_and_stays_flagged(self) -> None:

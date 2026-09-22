@@ -6,10 +6,21 @@
  * and adding a screen means replacing one element rather than wiring routing.
  */
 
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import { NavGuard } from "./NavGuard";
-import { Placeholder, SCREENS } from "../features/Placeholder";
-import { ImportScreen } from "../features/import/ImportScreen";
+import { RequireAuth } from "./RequireAuth";
+import { RootRedirect } from "./RootRedirect";
+import { Placeholder } from "../features/Placeholder";
+import { SignIn } from "../features/auth/SignIn";
+import { SignUp } from "../features/auth/SignUp";
+import { ForgotPassword } from "../features/auth/ForgotPassword";
+import { FirstImport } from "../features/onboarding/FirstImport";
+import { ImportFeature } from "../features/import/ImportFeature";
+import { CardsFeature } from "../features/cards/CardsFeature";
+import { ReviewFeature } from "../features/review/ReviewFeature";
+import { DashboardFeature } from "../features/dashboard/DashboardFeature";
+import { RulesFeature } from "../features/rules/RulesFeature";
+import { AccountFeature } from "../features/account/AccountFeature";
 import { RequestIdBoundary } from "../shared/RequestIdBoundary";
 
 export function AppRouter() {
@@ -19,19 +30,70 @@ export function AppRouter() {
       <main>
         <RequestIdBoundary>
           <Routes>
-            <Route path="/" element={<Navigate to="/import" replace />} />
+            <Route path="/" element={<RootRedirect />} />
 
-            {/* Built */}
-            <Route path="/import" element={<ImportScreen />} />
+            {/* Screens 00, 01 */}
+            <Route path="/sign-in" element={<SignIn />} />
+            <Route path="/sign-up" element={<SignUp />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
 
-            {/* Routed, not built */}
-            <Route path="/sign-in" element={<Placeholder {...SCREENS.signIn} />} />
-            <Route path="/first-import" element={<Placeholder {...SCREENS.firstImport} />} />
-            <Route path="/cards" element={<Placeholder {...SCREENS.cards} />} />
-            <Route path="/review" element={<Placeholder {...SCREENS.review} />} />
-            <Route path="/dashboard" element={<Placeholder {...SCREENS.dashboard} />} />
-            <Route path="/rules" element={<Placeholder {...SCREENS.rules} />} />
-            <Route path="/account" element={<Placeholder {...SCREENS.account} />} />
+            {/* Everything else needs a session. */}
+            <Route
+              path="/first-import"
+              element={
+                <RequireAuth>
+                  <FirstImport />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/import/*"
+              element={
+                <RequireAuth>
+                  <ImportFeature />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/cards/*"
+              element={
+                <RequireAuth>
+                  <CardsFeature />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/review/*"
+              element={
+                <RequireAuth>
+                  <ReviewFeature />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/dashboard/*"
+              element={
+                <RequireAuth>
+                  <DashboardFeature />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/rules/*"
+              element={
+                <RequireAuth>
+                  <RulesFeature />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/account/*"
+              element={
+                <RequireAuth>
+                  <AccountFeature />
+                </RequireAuth>
+              }
+            />
 
             <Route
               path="*"

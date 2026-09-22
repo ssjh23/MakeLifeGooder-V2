@@ -35,12 +35,42 @@ class MonthBand(Schema):
     by_category: dict[str, MoneyStr]
 
 
+class CompanyRow(Schema):
+    merchant_id: uuid.UUID
+    name: str
+    total: MoneyStr
+    share: float
+    transaction_count: int
+
+
+class CategoryTotal(Schema):
+    """A category name and amount, without the ranking fields ``CategoryBand``
+    carries -- just enough to say "the largest one was this"."""
+
+    category_id: uuid.UUID
+    name: str
+    total: MoneyStr
+
+
 class CategoryBand(Schema):
     category_id: uuid.UUID
     name: str
     total: MoneyStr
     share: float
+    #: Versus the immediately preceding month in the requested range.
+    #: ``None`` when that month isn't available to compare against (the
+    #: range's very first month, or "month" range with only one point).
     change: float | None = None
+    #: Row count for the whole range, from ``CategoryMonthlyTotal.txn_count``
+    #: -- no second query, the aggregate refresher already counted these.
+    rows: int = 0
+    #: Top two merchants across the whole displayed range (same scope as
+    #: ``total``/``share`` above), for the category card's inline "where the
+    #: money went" list (screen 06, band 02). The full ranked list, plus a
+    #: six-month trend, lives at screen 06b instead.
+    top_merchants: list[CompanyRow] = []
+    other_merchants_count: int = 0
+    other_merchants_total: MoneyStr | None = None
 
 
 class CardBand(Schema):
@@ -48,6 +78,11 @@ class CardBand(Schema):
     nickname: str
     colour: str | None = None
     total: MoneyStr
+    rows: int = 0
+    largest_category: CategoryTotal | None = None
+    #: Mirrors ``MonthBand.by_category``'s shape, scoped to this card instead
+    #: of a month -- what screen 06's "by card" split bar (band 03) segments.
+    by_category: dict[str, MoneyStr] = {}
 
 
 class DashboardResponse(Schema):
@@ -56,14 +91,6 @@ class DashboardResponse(Schema):
     categories: list[CategoryBand]
     cards: list[CardBand]
     range: RangeLiteral
-
-
-class CompanyRow(Schema):
-    merchant_id: uuid.UUID
-    name: str
-    total: MoneyStr
-    share: float
-    transaction_count: int
 
 
 class CategoryDetail(Schema):
@@ -89,6 +116,10 @@ class Provenance(Schema):
     line: int | None = None
     classified_by: ClassifiedByLiteral | None = None
     rule_id: uuid.UUID | None = None
+    #: The rule's own pattern, so screen 06c can show *what matched*
+    #: ("rule SQ* → Travel"), not just that a rule was involved. ``None``
+    #: whenever ``rule_id`` is, and also if the rule was since deleted.
+    rule_pattern: str | None = None
     prompt_version: str | None = None
 
 
@@ -100,6 +131,13 @@ class TransactionResponse(Schema):
     currency: str
     category_id: uuid.UUID | None = None
     merchant_id: uuid.UUID | None = None
+    #: Denormalised onto the response so the individual-transactions table
+    #: (screen 06, band 05) has a "Company" column without a client-side
+    #: join against ``/dashboard/categories/{id}`` or a second request.
+    merchant_name: str | None = None
+    #: The cascade's join key. Screen 06c uses it to offer "every row from
+    #: this company" as an override scope distinct from "this row only".
+    descriptor_key: str | None = None
     card_id: uuid.UUID | None = None
     provenance: Provenance | None = None
     flags: list[str] = []

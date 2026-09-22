@@ -14,20 +14,11 @@ from __future__ import annotations
 
 import hashlib
 
-from app.classify.llm.base import MerchantSuggestion
+from app.classify.llm.base import KNOWN_CATEGORY_SLUGS, MerchantSuggestion
 
-#: A small fixed taxonomy for tests. Keeping it small keeps expected values in
-#: test cases readable.
-FAKE_CATEGORIES = (
-    "food-drink",
-    "transport",
-    "groceries",
-    "shopping",
-    "utilities",
-    "entertainment",
-    "health",
-    "other",
-)
+#: The same taxonomy every adapter answers from (see KNOWN_CATEGORY_SLUGS),
+#: kept under its old name here since every test already imports it as such.
+FAKE_CATEGORIES = KNOWN_CATEGORY_SLUGS
 
 
 class FakeLLMAdapter:

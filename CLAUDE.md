@@ -4,11 +4,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Scaffolded, not implemented. Every seam is wired and runs; the business logic is not written.
+Implemented, not committed. Build order steps 0.1 through 9.3 are written in the
+working tree — the four gates, the classification cascade, the descriptor
+normaliser, money conversion, and every listed service method body — but `git
+log` still shows only the original `feat: initial commit`. Nothing below is on
+a branch yet; treat the working tree, not `HEAD`, as the source of truth for
+what "written" means.
 
-**Written and expected to work**: infrastructure, configuration, the twelve-table schema with its row level security policies, the tenant session, request context and telemetry, the error envelope, the HTTP surface, queue plumbing, the storage adapter, password authentication, and the test harness.
+**Test suite is green, not red.** `uv run pytest` at the backend root:
+**388 passed, 3 failed, 1 skipped.** The red-suite framing above the build
+order table described the scaffold's starting state; it no longer describes
+this repo. The three failures, so they don't get mistaken for scaffold noise:
 
-**Not written, and failing on purpose**: the four gates, the classification cascade, the descriptor normaliser, money conversion, and every service method body. These raise `NotImplementedError` and have failing tests that define correct behaviour. **A red suite is the expected state.** Endpoints whose service is unwritten return 501, which distinguishes them from broken ones.
+- `test_TC_AUTH_010_tampered_cookie_is_rejected` — expects 401, gets 200. A
+  tampered session cookie is not being rejected. This is a P0 auth-isolation
+  case, not a cosmetic mismatch, and is worth fixing before anything commits.
+- `TestOidcNotConfigured::test_start_is_503_when_unconfigured` and
+  `::test_callback_is_503_when_unconfigured` — both expect 503 when Auth0 env
+  vars are unset, get 401 instead. Looks like a route/dependency ordering
+  issue in `api/routers/auth.py`, not a design disagreement.
+
+`npm run typecheck` in `frontend/` is clean.
+
+**Still genuinely unwritten**, matching `NotImplementedError` in the tree —
+these are narrower than the four-gates list above, not a full retraction of
+it:
+- `extract/pdfplumber_parser.py` opens a PDF, detects password-protection, a
+  missing text layer and non-statement content, then stops before column
+  inference (BUILD STEP 2.2's row extraction). This is the same gap the build
+  order table already documents as blocked on real bank fixture PDFs and
+  depended on by nothing later — not a regression.
+- `services/auth.py` — password reset request/confirm. Already listed as
+  deferred below; still true.
+- `api/routers/statements.py` — manual row entry for unreadable scans. Already
+  listed as an open question below; still true.
+
+`monopoly-core` is now a hard dependency (`pyproject.toml`), not the optional
+extra this file used to describe — there is no longer a mode where the API
+runs without it. `pdfplumber` builds and passes its own unit tests but is not
+wired into the default `ParserRegistry`, so ADR-002's fallback path exists in
+code without being reachable yet.
 
 The design comes from the project's Notion workspace (Junior Dev SG Group 1 - MakeLifeGooder). Treat those pages as canonical and this file as their summary. When the two disagree, the Architecture Decision Records page wins on technology choices.
 
@@ -42,8 +77,9 @@ npm run dev
 - **The worker connects directly to Postgres, the API through the pooler on 6432.** The queue uses LISTEN/NOTIFY, which a transaction-mode pooler does not carry. Through the pooler jobs still run, just late.
 - **Port 6433 is a session-mode pooler that exists only as a test fixture.** Nothing in the application may point at it.
 - **Presigned URLs are signed with `S3_PUBLIC_ENDPOINT`.** The signature covers the host, so a URL signed for an internal address cannot be repaired by rewriting it.
-- **Two tables are not on the Notion schema page**: `rules` and `exports`. Both are required by specified endpoints and written test cases. Worth reconciling upstream.
+- **Three tables were built that never had a design page**: `rules` and `exports` (already flagged here as needing reconciliation) plus `descriptor_key_overrides`, which emerged during implementation as the fix for correcting one misnormalised raw descriptor without touching the shared normaliser (see ADR-006). All three, plus the columns implementation added to `statements`, `transactions`, `merchants` and `users`, have been reconciled into the Notion DB Schema Diagram page — this file's "Data model" section below still only names the original twelve.
 - **The traceparent rides in the job's arguments**, not a bespoke column, because the queue library owns its schema.
+- **`monopoly-core`'s native `pdftotext` binding must be built against the same CPU architecture as the interpreter running it, not just a `poppler` that's merely present.** On Apple Silicon under an x86_64 (Rosetta) Python with an arm64 Homebrew `poppler`, the import fails with a linker-level missing-symbol error, not an obviously-architecture-shaped one. Fix by matching the pair, not by reinstalling `poppler`: either run an arm64-native Python (`uv python install cpython-3.12-macos-aarch64-none`, recreate `.venv` with it) or build against an x86_64 `poppler`. Confirm with `otool -L .venv/lib/python3.12/site-packages/pdftotext*.so | grep poppler` — an empty result means it never linked against `poppler` at all, which is the same symptom, not a different bug.
 
 ## Build order
 
@@ -96,12 +132,19 @@ travels the whole architecture and fails honestly at the unwritten parser, with
 one trace id across the API and worker. After 4.4 a statement commits and the
 navigation unlocks. After 7.2 the product works end to end.
 
+**All three milestones are past, in the working tree.** Every step above has
+its `BUILD STEP` header and a passing test, except 2.2's row extraction, which
+remains exactly where this table already said it would: blocked on real bank
+fixture PDFs, with nothing later depending on it. See Status above for the
+three known-failing tests and the two genuine remaining gaps.
+
 Step 2.2 is blocked on redacted bank statements and **nothing depends on it**.
 Later steps seed rows directly, so skip it if the files are not ready.
 
 Deferred, and flagged in place rather than invented: manual row entry,
-multi-currency, rule precedence past two overlapping patterns, password reset
-delivery, and the OIDC provider.
+multi-currency, rule precedence past two overlapping patterns, and password
+reset delivery. The OIDC provider (below) is implemented -- Auth0, via
+`auth0-server-python` -- and is no longer one of these.
 
 ## What the product is
 

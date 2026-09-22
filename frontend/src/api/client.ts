@@ -18,6 +18,26 @@ export const api = createClient<paths>({
   credentials: "same-origin",
 });
 
+// openapi-fetch reads the body itself on a non-ok response (to populate the
+// `error` half of its `{ data, error, response }` return) before a caller
+// ever sees `response` -- a Response's body can only be read once, so every
+// `toApiError(response)` call site below was re-reading an already-drained
+// stream. That failed silently (caught, then ignored) and fell back to
+// `response.statusText`, which for a 409 is literally the word "Conflict" --
+// exactly the unhelpful message this was supposed to prevent.
+//
+// Cloning here, in an onResponse hook, runs before openapi-fetch's own read
+// (see its source: middleware fires, then it calls response.text()), so this
+// keeps one never-read copy per response for toApiError to parse instead of
+// the original. No call site needs to change: they still just pass `response`.
+const responseClones = new WeakMap<Response, Response>();
+api.use({
+  onResponse({ response }) {
+    responseClones.set(response, response.clone());
+    return undefined;
+  },
+});
+
 /**
  * An API failure carrying its correlation id.
  *
@@ -63,6 +83,53 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The two 409 shapes the server actually raises.
+ *
+ * `error.code` tells them apart: `statement_already_imported` carries
+ * `existing_statement_id`, `rule_conflict` carries `existing_id` plus
+ * `affected_rows` and a human `message`. They are not one shared schema
+ * despite both being "a conflict a person must resolve" — read `details` by
+ * `code`, not by guessing which fields are present.
+ */
+export interface DuplicateStatementConflict {
+  existing_statement_id: string;
+  resolutions: string[];
+}
+
+export interface RuleCollisionConflict {
+  kind: "rule_collision";
+  existing_id: string;
+  resolutions: string[];
+  affected_rows: number;
+  message: string;
+}
+
+export function asDuplicateStatementConflict(
+  error: ApiError,
+): DuplicateStatementConflict | null {
+  if (error.code !== "statement_already_imported") return null;
+  return error.details as unknown as DuplicateStatementConflict;
+}
+
+/**
+ * The exact same file was already uploaded (screen 03). Same shape as
+ * {@link DuplicateStatementConflict} -- `existing_statement_id` plus
+ * `resolutions` -- but a different `code`, and a different cause: this one
+ * fires at registration, before the new upload's statement even exists,
+ * whereas `statement_already_imported` fires at commit, on two statements
+ * that both already exist for the same card and period.
+ */
+export function asDuplicateFileConflict(error: ApiError): DuplicateStatementConflict | null {
+  if (error.code !== "duplicate_file_upload") return null;
+  return error.details as unknown as DuplicateStatementConflict;
+}
+
+export function asRuleCollisionConflict(error: ApiError): RuleCollisionConflict | null {
+  if (error.code !== "rule_conflict") return null;
+  return error.details as unknown as RuleCollisionConflict;
+}
+
 interface ErrorEnvelope {
   error?: {
     code?: string;
@@ -76,7 +143,8 @@ interface ErrorEnvelope {
 export async function toApiError(response: Response): Promise<ApiError> {
   let envelope: ErrorEnvelope = {};
   try {
-    envelope = (await response.json()) as ErrorEnvelope;
+    // The clone, not `response` itself: see the onResponse hook above.
+    envelope = (await (responseClones.get(response) ?? response).json()) as ErrorEnvelope;
   } catch {
     // A non-JSON error body is still an error; it just has less to say.
   }

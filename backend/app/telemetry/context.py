@@ -109,6 +109,18 @@ def current_traceparent() -> str | None:
     )
 
 
+def current_request_id() -> str | None:
+    """The active request's id, for code that has no ``Request`` to read it from.
+
+    Read from the same structlog contextvar the request middleware binds
+    (``app/api/middleware.py``), rather than threaded through as a parameter,
+    for the same reason :func:`current_traceparent` is: a value read from
+    context cannot disagree with the request it is stamped onto. ``None``
+    outside a request, such as a job running in the worker.
+    """
+    return structlog.contextvars.get_contextvars().get("request_id")
+
+
 def context_from_traceparent(traceparent: str | None) -> trace.Context | None:
     """Rebuild a span context from a traceparent produced by the API.
 

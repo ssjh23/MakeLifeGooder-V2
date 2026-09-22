@@ -15,6 +15,9 @@ dependencies = [
     "alembic>=1.14",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
+    # EmailStr (app/schemas/auth.py) validates through this at import time,
+    # not lazily, so it is a real dependency rather than an optional extra.
+    "email-validator>=2.2",
     "procrastinate>=3.0",
     "boto3>=1.35",
     "structlog>=24.4",
@@ -23,16 +26,22 @@ dependencies = [
     "itsdangerous>=2.2",
     "argon2-cffi>=23.1",
     "anthropic>=0.39",
-    # Fallback parser. Pure Python, installs anywhere.
+    # OIDC (ADR-008): the Authorization Code + PKCE dance against Auth0. Used
+    # only to acquire the ID token at /auth/oidc/callback; the session that
+    # follows is the same SessionCodec cookie password login issues, so the
+    # SDK's own session store is never read back (see app/api/oidc.py).
+    "auth0-server-python>=1.0.0b1",
+    # The primary parser (ADR-001): bank detection and per-bank extraction.
+    # Pulls system packages (poppler) that need a matching-architecture
+    # toolchain to build against; see "Things that look like details and are
+    # not" in CLAUDE.md if `import monopoly` fails at runtime.
+    "monopoly-core>=0.21",
+    # The documented AGPL exit (ADR-013) and the adapter contract's second
+    # implementation. Not wired into the default registry (ADR-001 rejects a
+    # PDF outright when Monopoly does not support the bank), but kept real and
+    # tested so dropping monopoly-core stays a live option.
     "pdfplumber>=0.11",
 ]
-
-[project.optional-dependencies]
-# monopoly-core is the primary parser (ADR-001) but pulls system packages and
-# does not install cleanly on every platform. Kept optional so `uv sync` always
-# succeeds and the scaffold always runs; ParserRegistry falls back to pdfplumber
-# and says so. Install with: uv sync --extra parsers
-parsers = ["monopoly-core>=0.21"]
 
 [dependency-groups]
 dev = [
@@ -81,7 +90,14 @@ warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["procrastinate.*", "pdfplumber.*", "monopoly.*", "boto3.*", "botocore.*"]
+module = [
+    "procrastinate.*",
+    "pdfplumber.*",
+    "monopoly.*",
+    "boto3.*",
+    "botocore.*",
+    "auth0_server_python.*",
+]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
@@ -89,6 +105,16 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# `get_engine()` / `get_sessionmaker()` (app/api/deps.py) are `@lru_cache`d,
+# a single asyncpg pool for the process's life -- correct for the app, which
+# only ever runs one event loop. pytest-asyncio's default is a fresh loop per
+# test, so a connection checked out on test N's loop gets used again on test
+# N+1's *different* loop and asyncpg raises "attached to a different loop" or
+# "Event loop is closed", nondeterministically, well after the failing test.
+# One event loop for the whole run keeps that pool's lifetime assumption true
+# in tests too.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 addopts = "-ra --strict-markers"
 markers = [
     "p0: blocks release. Data integrity, money correctness, tenant isolation or privacy",

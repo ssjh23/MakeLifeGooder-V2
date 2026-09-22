@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app.classify.normalise import normalise
+from app.classify.normalise import normalise, strip_reference_suffix
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "descriptors.toml"
 
@@ -71,3 +71,25 @@ def test_empty_and_whitespace_do_not_raise() -> None:
     pipeline as an unclassified row rather than failing an import."""
     assert normalise("") == ""
     assert normalise("   ") == ""
+
+
+class TestStripReferenceSuffix:
+    """The narrow cut of the pipeline split_descriptor() reuses -- see its
+    own docstring for why it can't just call normalise() instead."""
+
+    def test_removes_singapore_ref_no_and_everything_after_it(self) -> None:
+        assert (
+            strip_reference_suffix("SMP*GOMGOM Singapore Ref No. : 24575436044612140700973")
+            == "SMP*GOMGOM"
+        )
+
+    def test_removes_a_bare_ref_no_with_no_leading_singapore(self) -> None:
+        assert strip_reference_suffix("SINGTEL BILL PAYMENT Ref No. : 8842") == "SINGTEL BILL PAYMENT"
+
+    def test_a_different_reference_number_still_converges(self) -> None:
+        first = strip_reference_suffix("SMP*GOMGOM Singapore Ref No. : 24575436044612140700973")
+        second = strip_reference_suffix("SMP*GOMGOM Singapore Ref No. : 99999999999999999999999")
+        assert first == second
+
+    def test_leaves_text_with_no_reference_field_untouched(self) -> None:
+        assert strip_reference_suffix("MCDONALDS-JUNCTION8") == "MCDONALDS-JUNCTION8"

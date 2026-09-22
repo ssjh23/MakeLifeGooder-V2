@@ -27,86 +27,193 @@ parser today and having to wait for step 2.2 and a real bank statement.
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Awaitable, Callable
+from datetime import date
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.aggregate.refresh import AggregateRefresher
+from app.classify.alias import AliasWriter
+from app.classify.cascade import CascadeResolver
+from app.classify.llm import LLMAdapter, build_llm_adapter
+from app.classify.pipeline import classify
+from app.config import get_settings
+from app.db.models import JobStage, Statement, StatementStatus, User
+from app.db.repositories import (
+    CategoryRepository,
+    MerchantRepository,
+    ProcessingJobRepository,
+    StatementRepository,
+)
+from app.db.session import get_worker_sessionmaker, tenant_session, unscoped_session
+from app.extract.pipeline import extract
+from app.extract.registry import ParserRegistry
+from app.services.rules import RuleService
+from app.storage import ObjectStore, build_object_store
 from app.telemetry import events, get_logger
 from app.worker.app import app
 from app.worker.dispatch import run_stage
+from app.worker.queue import enqueue
 
 logger = get_logger(__name__)
 
 
+async def _scrub_password(statement_id: str) -> None:
+    """Erase ``password`` from every job payload recorded for this statement.
+
+    ``args`` is a database column (``procrastinate_jobs.args``), so a password
+    passed into a job is a password at rest until this runs. Matched by
+    ``statement_id`` and task name rather than a specific job id: it catches
+    every attempt that ever carried one for this statement, not only the one
+    that just finished (TC-FAIL-004).
+    """
+    async with unscoped_session(get_worker_sessionmaker()) as session:
+        await session.execute(
+            text(
+                "UPDATE procrastinate_jobs SET args = args - 'password' "
+                "WHERE task_name = 'statement.extract' "
+                "AND args ->> 'statement_id' = :statement_id "
+                "AND args ? 'password'"
+            ),
+            {"statement_id": statement_id},
+        )
+
+
 @app.task(name="statement.extract", retry=3, queue="extract")
 async def extract_statement(
-    *, statement_id: str, traceparent: str | None = None, password: str | None = None
+    *,
+    statement_id: str,
+    user_id: str,
+    traceparent: str | None = None,
+    password: str | None = None,
+    store: ObjectStore | None = None,
+    registry: ParserRegistry | None = None,
 ) -> None:
     """Stage one: parse the PDF, reconcile, write rows.
 
     BUILD STEP 4.2. Verify with tests/integration/test_import_flow.py.
 
-    TODO:
-      1. Set the statement to ``processing``.
-      2. Fetch the PDF from object storage by ``object_key``.
-      3. Compute ``file_sha256`` and check for an existing statement. Catching
-         a re-upload here avoids parsing a document already seen.
-      4. Select a parser through ``ParserRegistry`` and parse. Take the parser
-         as an argument so a stub can be injected, which is what lets this be
-         tested before step 2.2 exists.
-      5. Reconcile. **Write nothing** if it does not pass and no gap is
-         recorded.
-      6. Filter rows against ``existing_dedupe_hashes``.
-      7. Write the rows, set ``needs_review``, and record ``parser`` and
-         ``has_text_layer``.
-      8. On ``ExtractionFailure``, set ``failed`` with the reason and write no
-         rows at all. A partially imported file is worse than a rejected one
-         (TC-FAIL-007).
-      9. Blank ``password`` from the job payload when the job finishes. That
-         payload is a database row, and it is the one place a password could
-         linger (TC-FAIL-004).
-
-    Then add the retry test: fail mid-write, allow the retry, and assert the
-    final row count is correct with no duplicates from the retry (TC-FAIL-010).
+    ``store`` and ``registry`` are injectable and default to the real ones:
+    what lets this be called directly with a stub parser in a test, with no
+    queue and no real PDF involved. ``user_id`` rides on the job alongside
+    ``statement_id`` because the worker connects as ``ledger_app`` too --
+    row level security applies to it exactly as it does to the API -- and a
+    job cannot open a tenant session on a tenant it does not yet know, which
+    is the one thing it must know before it can even look ``statement_id``
+    up.
 
     ``password`` is present only on a retry after screen 03c, is used once in
-    memory, and is never persisted.
+    memory here, and is scrubbed from every job payload that carried it once
+    this attempt finishes, success or failure (TC-FAIL-004).
     """
+    store = store or build_object_store(get_settings())
+    registry = registry or ParserRegistry()
 
     async def _handler() -> None:
-        raise NotImplementedError("Extraction is not written yet.")
+        async with tenant_session(get_worker_sessionmaker(), uuid.UUID(user_id)) as session:
+            await extract(
+                session,
+                statement_id=uuid.UUID(statement_id),
+                store=store,
+                registry=registry,
+                password=password,
+            )
 
-    await run_stage(
-        stage="extract",
-        statement_id=statement_id,
-        traceparent=traceparent,
-        attempt=1,
-        handler=_handler,
-    )
+    try:
+        await run_stage(
+            stage="extract",
+            statement_id=statement_id,
+            traceparent=traceparent,
+            attempt=1,
+            handler=_handler,
+        )
+    finally:
+        if password:
+            await _scrub_password(statement_id)
+
+
+async def _record_stage(
+    session: AsyncSession,
+    *,
+    statement_id: str,
+    stage: JobStage,
+    outcome: Callable[[], Awaitable[None]],
+) -> None:
+    """Wrap one stage's work with :class:`~app.db.models.ProcessingJob`
+    bookkeeping, so ``StatementResponse.classification_status`` has something
+    to read while the stage is still running.
+
+    Independent of :func:`app.worker.dispatch.run_stage`, which owns
+    telemetry and the dead-letter decision; this owns only the row a request
+    can see mid-flight.
+    """
+    repo = ProcessingJobRepository(session)
+    await repo.start_attempt(statement_id=uuid.UUID(statement_id), stage=stage)
+    try:
+        await outcome()
+    except Exception as exc:
+        await repo.mark_failed(statement_id=uuid.UUID(statement_id), stage=stage, error=str(exc))
+        raise
+    else:
+        await repo.mark_succeeded(statement_id=uuid.UUID(statement_id), stage=stage)
 
 
 @app.task(name="statement.classify", retry=3, queue="classify")
-async def classify_statement(*, statement_id: str, traceparent: str | None = None) -> None:
+async def classify_statement(
+    *,
+    statement_id: str,
+    user_id: str,
+    traceparent: str | None = None,
+    llm: LLMAdapter | None = None,
+) -> None:
     """Stage two: normalise descriptors and resolve merchants.
 
     BUILD STEP 5.5. Verify with tests/integration/test_cascade.py.
 
-    TODO:
-      1. Load the statement's distinct ``description_raw`` values.
-      2. Normalise each into ``descriptor_key`` and store it on the rows.
-      3. Run ``CascadeResolver.resolve_many`` over the distinct keys, not over
-         the rows. A statement with forty McDonald's lines is one descriptor.
-      4. Write the resolved merchant, category, ``classified_by``, confidence
-         and ``prompt_version`` back onto the rows.
-      5. Enqueue the aggregate stage.
-      6. Let ``LLMUnavailable`` leave those descriptors unresolved and still
-         finish the stage. An outage degrades classification; it must not fail
-         an import (TC-REV-019).
+    ``llm`` is injectable and defaults to the configured adapter, the same
+    shape ``extract_statement`` takes ``store`` and ``registry``: what lets a
+    test drive this with the deterministic fake, or a stub that forces an
+    outage, with no queue involved.
 
     Retried independently of extraction, which is the reason the stages are
     separate: the model provider is the least reliable component in the system
     and PDF parsing is the most expensive, so a provider hiccup must never
     cause a re-parse.
     """
+    settings = get_settings()
+    llm = llm or build_llm_adapter(settings)
 
     async def _handler() -> None:
-        raise NotImplementedError("Classification is not written yet.")
+        async with tenant_session(get_worker_sessionmaker(), uuid.UUID(user_id)) as session:
+
+            async def _classify() -> None:
+                merchants = MerchantRepository(session)
+                cascade = CascadeResolver(
+                    merchants,
+                    CategoryRepository(session),
+                    AliasWriter(merchants),
+                    llm,
+                    trgm_threshold=settings.trgm_similarity_threshold,
+                )
+                await classify(session, statement_id=uuid.UUID(statement_id), cascade=cascade)
+
+                # Same transaction as the classify writes above: a crash between
+                # the two would otherwise leave classified rows with no aggregate
+                # job behind them, exactly the two-write hazard ADR-004 already
+                # rules out for the extract stage.
+                await enqueue(
+                    session,
+                    aggregate_statement,
+                    statement_id=statement_id,
+                    user_id=user_id,
+                    traceparent=traceparent,
+                )
+
+            await _record_stage(
+                session, statement_id=statement_id, stage=JobStage.CLASSIFY, outcome=_classify
+            )
 
     await run_stage(
         stage="classify",
@@ -118,19 +225,33 @@ async def classify_statement(*, statement_id: str, traceparent: str | None = Non
 
 
 @app.task(name="statement.aggregate", retry=3, queue="aggregate")
-async def aggregate_statement(*, statement_id: str, traceparent: str | None = None) -> None:
+async def aggregate_statement(
+    *, statement_id: str, user_id: str, traceparent: str | None = None
+) -> None:
     """Stage three: refresh the precomputed monthly totals.
 
     Wired as part of BUILD STEP 7.1.
 
-    TODO:
-      1. Call ``AggregateRefresher.refresh_statement``.
-      2. Set the statement to ``ready``.
-      3. Keep it idempotent, because this stage retries like the others.
+    Idempotent, because this stage retries like the others: refreshing the
+    same months twice is a delete-and-reinsert of the same rows, never an
+    accumulation (see :meth:`~app.aggregate.refresh.AggregateRefresher.refresh_months`).
     """
 
     async def _handler() -> None:
-        raise NotImplementedError("Aggregate refresh is not written yet.")
+        async with tenant_session(get_worker_sessionmaker(), uuid.UUID(user_id)) as session:
+
+            async def _aggregate() -> None:
+                await AggregateRefresher(session).refresh_statement(uuid.UUID(statement_id))
+
+                statement = await session.get(Statement, uuid.UUID(statement_id))
+                if statement is not None:
+                    statement.status = StatementStatus.READY
+
+            await _record_stage(
+                session, statement_id=statement_id, stage=JobStage.AGGREGATE, outcome=_aggregate
+            )
+
+        logger.info(events.STATEMENT_AGGREGATE_SUCCEEDED, statement_id=statement_id)
 
     await run_stage(
         stage="aggregate",
@@ -169,7 +290,18 @@ async def reapply_rules(
     """
 
     async def _handler() -> None:
-        raise NotImplementedError("Rule reapply is not written yet.")
+        month_dates = [date.fromisoformat(f"{m}-01") for m in months] if months else None
+        async with tenant_session(get_worker_sessionmaker(), uuid.UUID(user_id)) as session:
+            changed, preserved, discarded = await RuleService(session).apply_all_rules(
+                months=month_dates, keep_overrides=keep_overrides
+            )
+        logger.info(
+            events.RULES_REAPPLY_COMPLETED,
+            user_id=user_id,
+            changed=changed,
+            overrides_preserved=preserved,
+            overrides_discarded=discarded,
+        )
 
     await run_stage(
         stage="reapply",
@@ -181,31 +313,44 @@ async def reapply_rules(
 
 
 @app.task(name="account.purge", retry=5, queue="purge")
-async def purge_account(*, user_id: str, traceparent: str | None = None) -> None:
+async def purge_account(
+    *, user_id: str, traceparent: str | None = None, store: ObjectStore | None = None
+) -> None:
     """Delete everything for one account, across both systems.
 
     BUILD STEP 9.3. Verify with tests/integration/test_account.py.
 
-    TODO:
-      1. Delete every object under the user's prefix, with
-         ``delete_prefix``. Object storage deletes are already idempotent.
-      2. Delete the database rows.
-      3. Do storage first. If the order is reversed and the job dies in
-         between, the rows naming those objects are gone and nothing remains to
-         say which ones to delete: the bucket keeps them forever.
-      4. Leave ``audit_log`` alone.
-      5. Make the whole thing re-runnable. Test it by forcing a mid-purge
-         failure and letting the retry complete (TC-ACCT-010).
+    Storage first, database second: if the job dies in between, a retry
+    still has the statement rows naming which objects to delete. Reversed,
+    a crash would leave the rows gone and nothing left to say which objects
+    the bucket should drop, so they never would.
 
-    The only flow that has to stay consistent across the database and object
-    storage, which is why it is an idempotent job rather than a request.
+    The database half is one ``DELETE FROM users``, not a table-by-table
+    walk: every tenant table's foreign key to ``users`` is
+    ``ondelete="CASCADE"`` (0001_baseline), so Postgres removes accounts,
+    cards, statements, transactions, overrides, rules and exports in the
+    same statement. ``audit_log.actor_user_id`` carries no foreign key by
+    design, so it is never touched -- the record outlives the account,
+    which is when it matters.
 
-    ``audit_log`` rows survive. ``actor_user_id`` carries no foreign key
-    precisely so the record outlives the account, which is when it matters.
+    Idempotent by construction: object deletes are already idempotent, and
+    once the user row is gone a retry's own tenant-scoped reads simply find
+    nothing left to do.
     """
+    store = store or build_object_store(get_settings())
 
     async def _handler() -> None:
-        raise NotImplementedError("Account purge is not written yet.")
+        async with tenant_session(get_worker_sessionmaker(), uuid.UUID(user_id)) as session:
+            statements = await StatementRepository(session).list_for_user()
+            for statement in statements:
+                store.delete(key=statement.object_key)
+            store.delete_prefix(prefix=f"exports/{user_id}/")
+
+            user = await session.get(User, uuid.UUID(user_id))
+            if user is not None:
+                await session.delete(user)
+
+        logger.info(events.ACCOUNT_DELETE_COMPLETED, user_id=user_id, objects_deleted=len(statements))
 
     logger.info(events.ACCOUNT_DELETE_REQUESTED, user_id=user_id)
     await run_stage(

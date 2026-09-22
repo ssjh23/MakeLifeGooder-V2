@@ -42,46 +42,31 @@ DEFAULT_CURRENCY: Final[str] = "SGD"
 
 class UnknownCurrencyError(ValueError):
     """Raised for a currency with no known minor-unit exponent.
-
-    Deliberately loud. Guessing two decimal places for an unknown currency
-    would silently misstate every amount in it by a factor of a hundred.
     """
 
 
 def exponent(currency: str) -> int:
-    """Return the number of minor units for ``currency``.
-
-    TODO:
-      1. Look ``currency`` up in :data:`MINOR_UNITS`.
-      2. Raise :class:`UnknownCurrencyError` when it is absent. Do not fall back
-         to two: a wrong exponent is a hundredfold error that nothing
-         downstream can detect.
+    """Return the number of minor units for ``currency``
 
     Raises:
         UnknownCurrencyError: if the code is not in :data:`MINOR_UNITS`.
     """
-    raise NotImplementedError
+    if currency not in MINOR_UNITS:
+        raise UnknownCurrencyError(f"Unknown currency: {currency}")
+    return MINOR_UNITS[currency]
 
 
 def to_minor(amount: Decimal | str, currency: str = DEFAULT_CURRENCY) -> int:
     """Convert a decimal amount to signed minor units.
 
     ``"12.40"`` in SGD is ``1240``. A refund is negative.
-
-    TODO:
-      1. Accept a ``str`` or a ``Decimal``. Build a ``Decimal`` from the string
-         directly, never via ``float``, or the error you are avoiding is
-         reintroduced at the boundary.
-      2. Read the exponent with :func:`exponent`.
-      3. Reject an amount carrying more precision than the currency allows,
-         rather than rounding it. Silently dropping a third decimal place makes
-         a statement fail to reconcile for a reason nobody can see on screen.
-      4. Shift by the exponent and return an ``int``.
-      5. Check the zero-exponent case works: JPY has no minor unit at all.
-
-    See TC-REC-008, TC-REC-009.
     """
-    raise NotImplementedError
+    if isinstance(amount, str):
+        amount = Decimal(amount)
+    exp = exponent(currency)
+    if amount.as_tuple().exponent < -exp:
+        raise ValueError(f"Amount has more precision than allowed for {currency}")
+    return int(amount * (10 ** exp))
 
 
 def to_decimal_string(amount_minor: int, currency: str = DEFAULT_CURRENCY) -> str:
@@ -89,27 +74,13 @@ def to_decimal_string(amount_minor: int, currency: str = DEFAULT_CURRENCY) -> st
 
     ``1240`` in SGD is ``"12.40"``. Always fully padded, never in scientific
     notation, and never a float on the way through.
-
-    TODO:
-      1. Divide by the currency's scale using ``Decimal``, not ``/``.
-      2. Quantise to the exponent so ``5`` renders as ``"0.05"`` rather than
-         ``"0.05000"`` or ``"0.5"``.
-      3. Format with an explicit format spec. ``str(Decimal)`` will use
-         scientific notation for large values, and a total of ``1E+12`` on a
-         dashboard is a bug report.
-      4. Confirm it round-trips: ``to_decimal_string(to_minor(x)) == x``.
     """
-    raise NotImplementedError
+    exp = exponent(currency)
+    amount = Decimal(amount_minor) / (10 ** exp)
+    return f"{amount:.{exp}f}"
 
 
 def sum_minor(amounts: list[int]) -> int:
     """Total a list of minor-unit amounts.
-
-    Trivial by construction, which is the point: integers make the reconciler's
-    central comparison exact. Present as a named function so the call site reads
-    as an intention rather than a builtin.
-
-    TODO:
-      1. Sum the list. An empty list is ``0``, not an error.
     """
-    raise NotImplementedError
+    return sum(amounts)

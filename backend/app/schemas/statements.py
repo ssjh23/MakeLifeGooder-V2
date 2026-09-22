@@ -14,6 +14,11 @@ StatementStatusLiteral = Literal["pending", "processing", "needs_review", "ready
 FailureReasonLiteral = Literal[
     "password_protected", "no_text_layer", "not_a_statement", "parser_error"
 ]
+#: Distinct from ``StatementStatusLiteral``, which already means something
+#: else during extraction (``processing``/``needs_review``). This tracks the
+#: post-commit classify/aggregate pipeline instead, via ``ProcessingJob``.
+#: ``None`` means "not applicable" -- not yet committed.
+ClassificationStatusLiteral = Literal["in_progress", "done", "failed"]
 
 
 class UploadUrlRequest(Schema):
@@ -69,6 +74,13 @@ class StatementResponse(Schema):
     status: StatementStatusLiteral
     card_id: uuid.UUID | None = None
     period: Period | None = None
+    #: The statement's closing date alone -- unlike ``period``, this is set
+    #: whenever the parser found *a* date at all. Most bank formats only ever
+    #: print a closing date, not an explicit period start, so ``period``
+    #: (which needs both bounds) stays null far more often than a statement
+    #: actually has a month it belongs to. This is what screen 04's picker
+    #: shows next to a statement's id.
+    statement_month: date | None = None
     #: Exposed so a stuck statement can be traced from a support conversation
     #: without database access.
     trace_id: str | None = None
@@ -76,11 +88,36 @@ class StatementResponse(Schema):
     extraction: ExtractionReport | None = None
     failure: StatementFailure | None = None
     reconciliation: Reconciliation | None = None
+    #: Where classification stands in the background pipeline, so the review
+    #: board can distinguish "still classifying" from "nothing matched".
+    #: ``None`` before commit, when classification has not been enqueued yet.
+    classification_status: ClassificationStatusLiteral | None = None
+    #: True while any counted row on this statement still has no category --
+    #: the same condition that blocks ``POST .../review/finish``. ``False``
+    #: pre-commit and once every row is classified, so the statement picker
+    #: (screen 04) can separate "still needs a decision" from a statement
+    #: someone already finished reviewing, rather than listing every
+    #: committed statement forever with no way to tell them apart.
+    needs_review: bool = False
     uploaded_at: datetime
 
 
 class StatementTag(Schema):
     card_id: uuid.UUID
+
+
+class DeleteStatementRequest(Schema):
+    """Removes a statement outright, whether it's been committed or not.
+
+    Pre-commit this is indistinguishable from ``/discard`` -- the ledger ends
+    up exactly as if the statement never existed, so ``confirm`` is not
+    required. Once committed, real spending history disappears and every
+    month the statement touched is recalculated, so ``confirm`` must be
+    explicit (TC-CARD-010's reasoning applies here too: the irreversible path
+    should not be reachable by a request that merely forgot a field).
+    """
+
+    confirm: bool = False
 
 
 class UnlockRequest(Schema):
@@ -126,6 +163,7 @@ class RowResponse(Schema):
     amount: MoneyStr
     currency: CurrencyCode
     skipped: bool = False
+    deleted: bool = False
     page: int | None = None
     line: int | None = None
 

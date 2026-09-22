@@ -12,9 +12,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api, toApiError } from "../api/client";
-import type { StatementResponse } from "../api/generated/schema";
+import type { StatementResponse } from "../api/types";
 
-const TERMINAL: ReadonlySet<string> = new Set(["ready", "failed"]);
+// "needs_review" is also a stable rest state for this poll: extraction has
+// finished and nothing further changes it except the user's own row edits and
+// commit, each of which already drives its own refetch. Leaving it out here
+// would poll every two seconds for as long as someone sits on the
+// reconciliation screen.
+const TERMINAL: ReadonlySet<string> = new Set(["ready", "failed", "needs_review"]);
 const POLL_INTERVAL_MS = 2000;
 
 export function useStatementPolling(statementId: string | null) {
