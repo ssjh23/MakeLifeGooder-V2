@@ -1,5 +1,19 @@
 # Ledger
 
+## About this project
+
+Built in 2026 as **MakeLifeGooder**, Group 1's project in the
+[Junior Dev SG](https://app.notion.com/p/3827ff4c3854820b854981985c2ec254)
+mentorship programme.
+
+**Who is it for:** people who want to upload their bank statement and have it
+categorised automatically, and see where their money goes without building
+their own Excel sheet.
+
+- Documentation (Notion): [Junior Dev SG Group 1 - MakeLifeGooder](https://app.notion.com/p/3827ff4c3854820b854981985c2ec254)
+- [System Architecture Diagram](https://claude.ai/artifact/UowKnvvb4CfkLj8GSqbCRU)
+- [Local Development Architecture Diagram](https://claude.ai/artifact/LMptduGe6AK2GEF2wttsu6)
+
 A bank statement classifier for Singapore. Upload a statement PDF, the rows are
 extracted and checked against the printed total, merchants are resolved and
 categorised, and spend is reported by month, category and card.
